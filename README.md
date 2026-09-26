@@ -32,7 +32,8 @@ of a 1992 Borland IDE pointed at a modern perl.
   from `q` to `tr`, interpolation inside strings and regexes, and the
   difference between `$x / 2` and `split /,/`.
 - **Run your script** (Ctrl-F9) with its output captured into a window, or
-  on the real console when it needs the keyboard.
+  on the real console when it needs the keyboard. `Alt-F5` steps back to the
+  terminal afterwards, so a console run's output can be read again.
 - **Syntax check** (F9) with `perl -c`. Errors land in a message list;
   Enter on one opens the file and puts the cursor on the line.
 - **perldoc** for the word under the cursor (Ctrl-F1), or by name.
@@ -83,6 +84,7 @@ turboperl --help
 | `Alt-C` / `Alt-U` | comment / uncomment the selected lines |
 | `Alt-I` / `Alt-D` | indent / unindent the selected lines |
 | `Alt-O` / `Alt-M` | show the output / message window |
+| `Alt-F5` | user screen — step back to the terminal a console run wrote to |
 | `F5` / `F6` / `Alt-F3` | zoom / next window / close |
 | `F10` | menu |
 | `Alt-X` | exit |
@@ -90,6 +92,19 @@ turboperl --help
 Select with Shift and the cursor keys, or mark a block the WordStar way with
 `Ctrl-K B`. Find, replace and go to line are on the Search menu with their
 usual `Ctrl-Q` prefixes.
+
+### Console runs
+
+"Run on console" hands the terminal back to the script, so it can prompt and
+read from the keyboard. The IDE waits on `press Enter` afterwards rather than
+repainting over the output, and discards anything already sitting in the
+input buffer first — a stray mouse report or a queued keystroke would
+otherwise satisfy that prompt and take the output away before it could be
+read. `Alt-F5` goes back to the terminal at any time.
+
+If the output still never appears, run with the default `capture` mode
+instead: it collects stdout and stderr into the Output window, where they
+stay until cleared.
 
 ## Settings
 

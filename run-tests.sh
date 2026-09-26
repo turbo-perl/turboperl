@@ -221,7 +221,39 @@ S=$(screen)
 check "perldoc looks the word up" "$S" "perldoc -f print"
 stop
 
-# ------------------------------------------------------------- 10. quitting
+# ------------------------------- 10. running on the console, and the user screen
+cat > "$TMPDIR_T/console.pl" <<'EOF'
+$| = 1;
+print "CONSOLE OUTPUT LINE\n";
+EOF
+start "$TMPDIR_T/console.pl"
+keys M-r
+DELAY=3 keys c
+S=$(screen)
+check "console run shows the script's output" "$S" "CONSOLE OUTPUT LINE"
+check "console run waits before returning"    "$S" "press Enter to return to the IDE"
+
+# Stray bytes arriving on the terminal must not dismiss that prompt.
+tmux send-keys -t "$SESSION" -H 1b 5b 4d 20 21 21
+sleep 2
+S=$(screen)
+check "stray input does not dismiss the prompt" "$S" "press Enter to return to the IDE"
+
+DELAY=2 keys Enter
+S=$(screen)
+check "Enter returns to the IDE" "$S" "File  Edit  Search  Run"
+
+# Alt-F5 steps back to the terminal, where the output still is.
+DELAY=2 keys M-F5
+S=$(screen)
+check "the user screen brings the output back" "$S" "CONSOLE OUTPUT LINE"
+check "its prompt sits at the bottom"          "$S" "user screen - press Enter to go back"
+DELAY=2 keys Enter
+S=$(screen)
+check "Enter leaves the user screen" "$S" "File  Edit  Search  Run"
+stop
+
+# ------------------------------------------------------------- 11. quitting
 start "$TMPDIR_T/good.pl"
 DELAY=2 keys M-x
 if tmux has-session -t "$SESSION" 2>/dev/null; then

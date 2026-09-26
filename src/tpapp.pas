@@ -13,6 +13,7 @@ interface
 uses
   Objects, Drivers, Views, Menus, App, MsgBox, StdDlg, Editors,
   FVConsts, Gadgets, Video,
+  {$IFDEF UNIX} BaseUnix, {$ENDIF}
   SysUtils, Classes,
   TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText;
 
@@ -44,6 +45,7 @@ type
 
     { --- running --- }
     procedure RunScript(OnConsole: Boolean);
+    procedure WaitForEnter(const Prompt: AnsiString; AtBottom: Boolean = False);
     procedure SyntaxCheck;
     procedure RunTidy;
     procedure RunCritic;
@@ -70,6 +72,7 @@ type
     function  ScriptWorkDir(const Script: AnsiString): AnsiString;
     procedure SuspendScreen;
     procedure ResumeScreen;
+    procedure ShowUserScreen;
     procedure Complain(const S: AnsiString);
     function  NextWindowNumber: Integer;
   end;
@@ -280,11 +283,13 @@ begin
     NewItem('~S~ize/move',               'Ctrl-F5',   kbCtrlF5,   cmResize,          hcNoContext,
     NewItem('~C~lose',                   'Alt-F3',    kbAltF3,    cmClose,           hcNoContext,
     NewLine(
+    NewItem('~U~ser screen',             'Alt-F5',    kbAltF5,    cmUserScreen,      hcNoContext,
+    NewLine(
     NewItem('~O~utput',                  'Alt-O',     kbAltO,     cmShowOutput,      hcNoContext,
     NewItem('~M~essages',                'Alt-M',     kbAltM,     cmShowMessages,    hcNoContext,
     NewItem('Cl~e~ar output',            '',          kbNoKey,    cmClearOutput,     hcNoContext,
     NewItem('Sa~v~e output...',          '',          kbNoKey,    cmSaveOutput,      hcNoContext,
-    nil)))))))))))));
+    nil)))))))))))))));
 end;
 
 function MenuHelp: PMenuItem;
@@ -550,12 +555,65 @@ begin
   Result := Script <> '';
 end;
 
+{ Throw away anything already sitting in the terminal's input buffer.
+
+  Between handing the terminal back and asking the user to press Enter, all
+  sorts of bytes can arrive that nobody typed: a left over mouse report, a
+  reply to a terminal query, or type-ahead aimed at the script that has just
+  finished.  Any one of them satisfies a plain ReadLn straight away, the IDE
+  repaints, and the run's output is gone before it could be read. }
+procedure DrainPendingInput;
+{$IFDEF UNIX}
+var
+  Flags, Got: Integer;
+  Buf: array[0..255] of Byte;
+begin
+  Flags := FpFcntl(0, F_GetFl, 0);
+  if Flags = -1 then Exit;
+  if FpFcntl(0, F_SetFl, Flags or O_NONBLOCK) = -1 then Exit;
+  repeat
+    Got := FpRead(0, Buf, SizeOf(Buf));
+  until Got <= 0;
+  FpFcntl(0, F_SetFl, Flags);
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+{ Print a prompt on the bare terminal and wait for a real Enter.
+
+  AtBottom parks the prompt on the last line first.  After stepping off the
+  IDE's display the cursor sits at the top, so printing there would scroll
+  away the very output the user asked to look at. }
+procedure TTurboPerl.WaitForEnter(const Prompt: AnsiString; AtBottom: Boolean);
+begin
+  if AtBottom then
+    { Row 999 clamps to the last line on any terminal able to run the IDE. }
+    Write(#27'[999;1H')
+  else
+    WriteLn;
+  Write(Prompt);
+  Flush(Output);
+  DrainPendingInput;
+  ReadLn;
+end;
+
 procedure TTurboPerl.SuspendScreen;
 begin
   DoneSysError;
   DoneEvents;
   Drivers.DoneVideo;
   Drivers.DoneKeyboard;
+end;
+
+{ Turbo Pascal's user screen: step off the IDE's display and back onto the
+  terminal underneath, which is where a console run left its output. }
+procedure TTurboPerl.ShowUserScreen;
+begin
+  SuspendScreen;
+  WaitForEnter('--- ' + TPTitle + ' user screen - press Enter to go back ---', True);
+  ResumeScreen;
 end;
 
 procedure TTurboPerl.ResumeScreen;
@@ -593,10 +651,8 @@ begin
     WriteLn('--- ', TPTitle, ': running ', ExtractFileName(Script), ' ---');
     Flush(Output);
     Code := RunOnConsole(Cfg.PerlExe, Args, ScriptWorkDir(Script), Env);
-    WriteLn;
-    WriteLn('--- exit code ', Code, ' --- press Enter to return to the IDE ---');
-    Flush(Output);
-    ReadLn;
+    WaitForEnter('--- exit code ' + IntToStr(Code) +
+                 ' --- press Enter to return to the IDE (Alt-F5 shows this again) ---');
     ResumeScreen;
     Exit;
   end;
@@ -1034,6 +1090,7 @@ begin
     cmNextError    : StepError(1);
     cmPrevError    : StepError(-1);
 
+    cmUserScreen   : ShowUserScreen;
     cmShowOutput   : if OutWin <> nil then begin OutWin^.Show; OutWin^.Select; end;
     cmShowMessages : if MsgWin <> nil then begin MsgWin^.Show; MsgWin^.Select; end;
     cmClearOutput  :
