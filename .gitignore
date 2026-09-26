@@ -1,0 +1,20 @@
+# Build output
+/units/
+/turboperl
+
+# Compiled test programs; their sources are tracked
+/tests/cfgtest
+/tests/hltest
+/tests/perltest
+/tests/texttest
+
+# Free Pascal intermediates, wherever they land
+*.o
+*.ppu
+*.a
+*.rsj
+*.compiled
+
+# Backups written by the IDE's own editor, and stray editor droppings
+*.bak
+*~

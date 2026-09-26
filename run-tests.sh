@@ -1,0 +1,235 @@
+#!/bin/sh
+# Integration tests for TurboPerl.
+#
+# The IDE is a full screen terminal program, so these drive the real thing
+# inside tmux and assert on what ends up on the screen.  Anything that can be
+# checked without a screen lives in tests/ instead and runs much faster.
+#
+#   ./run-tests.sh            run them all
+#   ./run-tests.sh -v         also print each captured screen
+
+set -u
+
+IDE=./turboperl
+SESSION=turboperl-test-$$
+VERBOSE=${1:-}
+PASS=0
+FAIL=0
+TMPDIR_T=$(mktemp -d)
+trap 'tmux kill-session -t "$SESSION" 2>/dev/null; rm -rf "$TMPDIR_T"' EXIT INT TERM
+
+if [ ! -x "$IDE" ]; then
+    echo "run-tests.sh: $IDE is not built; run make first" >&2
+    exit 2
+fi
+if ! command -v tmux >/dev/null 2>&1; then
+    echo "run-tests.sh: tmux is needed for the interface tests; skipping" >&2
+    exit 0
+fi
+
+# start SESSION running the IDE on the given arguments
+start() {
+    tmux kill-session -t "$SESSION" 2>/dev/null
+    tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" "$IDE $*"
+    sleep 2
+}
+
+stop() {
+    tmux kill-session -t "$SESSION" 2>/dev/null
+    sleep 0.3
+}
+
+keys() {
+    tmux send-keys -t "$SESSION" "$@"
+    sleep "${DELAY:-1}"
+}
+
+screen() { tmux capture-pane -t "$SESSION" -p; }
+screen_colour() { tmux capture-pane -t "$SESSION" -p -e; }
+
+# check NAME HAYSTACK NEEDLE
+check() {
+    name=$1; hay=$2; needle=$3
+    if printf '%s' "$hay" | grep -qF -- "$needle"; then
+        PASS=$((PASS + 1))
+        printf 'ok   %s\n' "$name"
+    else
+        FAIL=$((FAIL + 1))
+        printf 'FAIL %s\n' "$name"
+        printf '       looked for: %s\n' "$needle"
+        printf '%s\n' "$hay" | sed 's/^/       | /'
+    fi
+    [ "$VERBOSE" = "-v" ] && printf '%s\n' "$hay" | sed 's/^/     > /'
+    return 0
+}
+
+# check_re NAME HAYSTACK EXTENDED-REGEX
+check_re() {
+    name=$1; hay=$2; re=$3
+    if printf '%s' "$hay" | grep -qE -- "$re"; then
+        PASS=$((PASS + 1))
+        printf 'ok   %s\n' "$name"
+    else
+        FAIL=$((FAIL + 1))
+        printf 'FAIL %s\n' "$name"
+        printf '       looked for /%s/\n' "$re"
+        printf '%s\n' "$hay" | sed 's/^/       | /'
+    fi
+    return 0
+}
+
+check_not() {
+    name=$1; hay=$2; needle=$3
+    if printf '%s' "$hay" | grep -qF -- "$needle"; then
+        FAIL=$((FAIL + 1))
+        printf 'FAIL %s (unexpectedly found "%s")\n' "$name" "$needle"
+    else
+        PASS=$((PASS + 1))
+        printf 'ok   %s\n' "$name"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------- fixtures
+cat > "$TMPDIR_T/good.pl" <<'EOF'
+#!/usr/bin/perl
+use strict;
+use warnings;
+my @xs = qw(one two three);
+print "count: ", scalar(@xs), "\n";
+warn "a warning\n";
+print "last: $xs[-1]\n";
+EOF
+
+cat > "$TMPDIR_T/bad.pl" <<'EOF'
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+my $ok = 1;
+
+sub thing {
+    return $never_declared;
+}
+EOF
+
+cat > "$TMPDIR_T/block.pl" <<'EOF'
+my $a = 1;
+my $b = 2;
+my $c = 3;
+my $d = 4;
+EOF
+
+perl -e 'print "my \$r = \"";
+         printf "%09d|", $_*10 for 1..15;
+         print "\";\n";' > "$TMPDIR_T/long.pl"
+
+echo "== TurboPerl interface tests =="
+
+# ------------------------------------------------------- 1. it comes up
+start "$TMPDIR_T/good.pl"
+S=$(screen)
+check "menu bar is drawn"        "$S" "File  Edit  Search  Run  Tools  Options  Window  Help"
+check "status line is drawn"     "$S" "F9 Check"
+check "the file is loaded"       "$S" "print \"count: \", scalar(@xs)"
+check "the title shows the file" "$S" "good.pl"
+
+# ------------------------------------------------- 2. syntax highlighting
+C=$(screen_colour)
+check "keywords are coloured"    "$C" "$(printf '\033[97m')"
+check "comments are coloured"    "$C" "$(printf '\033[36m')"
+check "strings are coloured"     "$C" "$(printf '\033[92m')"
+check "variables are coloured"   "$C" "$(printf '\033[96m')"
+stop
+
+# --------------------------------------------------- 3. syntax check, clean
+start "$TMPDIR_T/good.pl"
+keys F9
+DELAY=3 keys ""
+S=$(screen)
+check "clean file reports syntax OK" "$S" "syntax OK"
+keys Enter
+stop
+
+# -------------------------------------------------- 4. syntax check, broken
+start "$TMPDIR_T/bad.pl"
+DELAY=4 keys F9
+S=$(screen)
+check "error is listed with its line" "$S" "bad.pl:8:"
+check "error text is shown"           "$S" "Global symbol"
+check "output window shows perl"      "$S" "had compilation errors"
+
+# ------------------------------------------------------- 5. jump to the error
+DELAY=2 keys Enter
+S=$(screen)
+check "Enter jumps to the error line" "$S" "8:1"
+stop
+
+# ------------------------------------------------------------ 6. running
+start "$TMPDIR_T/good.pl"
+keys M-r
+DELAY=4 keys r
+S=$(screen)
+check "run captures stdout"        "$S" "count: 3"
+check "run captures stderr"        "$S" "a warning"
+check "run captures later output"  "$S" "last: three"
+check "exit code is reported"      "$S" "exit code 0"
+# print/warn/print must come back in the order the script made them
+ORDER=$(printf '%s' "$S" | grep -n -E "count: 3|a warning|last: three" | cut -d: -f1 | tr '\n' ' ')
+FIRST=$(echo "$ORDER" | awk '{print $1}')
+SECOND=$(echo "$ORDER" | awk '{print $2}')
+THIRD=$(echo "$ORDER" | awk '{print $3}')
+if [ -n "$THIRD" ] && [ "$FIRST" -lt "$SECOND" ] && [ "$SECOND" -lt "$THIRD" ]; then
+    PASS=$((PASS + 1)); echo "ok   stdout and stderr interleave in order"
+else
+    FAIL=$((FAIL + 1)); echo "FAIL stdout and stderr interleave in order ($ORDER)"
+fi
+check_not "clean run raises no messages" "$S" "Messages - good.pl"
+stop
+
+# ------------------------------------------------- 7. block comment round trip
+start "$TMPDIR_T/block.pl"
+DELAY=0.4 keys S-Down
+DELAY=0.4 keys S-Down
+DELAY=1.5 keys M-c
+S=$(screen)
+check "block comment marks the selected lines" "$S" "# my \$a = 1;"
+check_re "block comment stops at the selection" "$S" '[^#]my \$c = 3;'
+DELAY=1.5 keys M-u
+S=$(screen)
+check_re "uncomment restores the text"          "$S" '[^#]my \$a = 1;'
+check_not "no # is left behind"                "$S" "# my \$a"
+stop
+
+# -------------------------------------------------- 8. horizontal scrolling
+COLS=80 ROWS=12 start "$TMPDIR_T/long.pl"
+S=$(screen)
+check "long line starts at column 1" "$S" "my \$r = \"000000010|"
+DELAY=1.5 keys End
+S=$(screen)
+check "scrolled view shows the line end" "$S" "000000150|\";"
+check_not "no stale text from column 1" "$S" "my \$r = \""
+stop
+
+# ------------------------------------------------------------- 9. perldoc
+start "$TMPDIR_T/good.pl"
+DELAY=0.3 keys Down Down Down Down
+DELAY=0.3 keys Right Right
+keys M-t
+DELAY=5 keys h
+S=$(screen)
+check "perldoc looks the word up" "$S" "perldoc -f print"
+stop
+
+# ------------------------------------------------------------- 10. quitting
+start "$TMPDIR_T/good.pl"
+DELAY=2 keys M-x
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+    FAIL=$((FAIL + 1)); echo "FAIL Alt-X exits"
+else
+    PASS=$((PASS + 1)); echo "ok   Alt-X exits"
+fi
+
+echo
+echo "interface tests: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ] || exit 1
