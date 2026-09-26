@@ -30,7 +30,15 @@ fi
 # start SESSION running the IDE on the given arguments
 start() {
     tmux kill-session -t "$SESSION" 2>/dev/null
-    tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" "$IDE $*"
+    # FORCETERM runs the IDE under a different terminal description; tmux
+    # still renders the result, which is what lets the alternate-screen
+    # handling be exercised for more than one style of terminal.
+    if [ -n "${FORCETERM:-}" ]; then
+        tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" \
+             "TERM=$FORCETERM $IDE $*"
+    else
+        tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" "$IDE $*"
+    fi
     sleep 2
 }
 
@@ -282,6 +290,29 @@ else
     PASS=$((PASS + 1)); echo "ok   console output starts at the left margin"
 fi
 DELAY=2 keys Enter
+stop
+
+# The same again on a terminal whose alternate screen does not carry the
+# cursor across.  putty's smcup/rmcup are a bare ESC [ ? 47 h / l, so without
+# the IDE saving and restoring the cursor itself a console run lands in the
+# middle of the console and writes over it.
+FORCETERM=putty start "$TMPDIR_T/twice.pl"
+keys M-r
+DELAY=3 keys c
+DELAY=2 keys Enter
+keys M-r
+DELAY=3 keys c
+S=$(screen)
+COUNT=$(printf '%s' "$S" | grep -c "MARKER")
+if [ "$COUNT" -ge 2 ]; then
+    PASS=$((PASS + 1)); echo "ok   console runs append on a terminal without cursor save"
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL console runs append on a terminal without cursor save (found $COUNT of 2)"
+    printf '%s\n' "$S" | sed 's/^/       | /'
+fi
+DELAY=2 keys Enter
+unset FORCETERM
 stop
 
 # ------------------------------------------------------------- 11. quitting

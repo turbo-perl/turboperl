@@ -98,6 +98,26 @@ var
     has none.  See DetectScreenSwitch. }
   Smcup : AnsiString = '';
   Rmcup : AnsiString = '';
+
+const
+  { Not every terminal's alternate screen carries the cursor across.
+    xterm and screen use ESC [ ? 1049, which saves and restores it; rxvt and
+    konsole spell their smcup/rmcup with an explicit ESC 7 / ESC 8 pair; but
+    putty's are a bare ESC [ ? 47 h and ESC [ ? 47 l, which move between the
+    screens and leave the cursor wherever the IDE happened to put it - so a
+    console run would land in the middle of the console and write over it.
+
+    Bracketing the switch with our own save and restore covers all three.
+    Where the terminal already does it the extra pair is a no-op: it writes
+    and reads back the same position. }
+  CursorSave    = #27'7';
+  CursorRestore = #27'8';
+
+var
+  { Where the console's cursor was when the IDE last had the screen.  Zero
+    means we never managed to find out. }
+  ConsoleRow : Integer = 0;
+  ConsoleCol : Integer = 0;
   {$IFDEF UNIX}
   { The terminal settings as the shell had them, so a console run gets the
     console back exactly as it was. }
@@ -108,6 +128,103 @@ var
 { -------------------------------------------------------------------------- }
 
 procedure DetectScreenSwitch; forward;
+procedure DebugScreenSwitch; forward;
+
+{$IFDEF UNIX}
+{ Ask the terminal where its cursor is, with a device status report.
+
+  This is the only dependable way to get the console's cursor back after a
+  spell on the alternate screen.  The terminal's own save slot cannot be
+  used: Free Pascal's InitVideo homes the cursor just before switching
+  screens, and on xterm the switch saves the cursor into the same slot that
+  ESC 7 writes to - so whatever was saved beforehand is overwritten with
+  row 1, column 1, and leaving the alternate screen faithfully puts the
+  cursor back at the top of the console.
+
+  Returns False if the terminal does not answer, in which case the caller
+  falls back to the save slot and hopes. }
+function QueryCursor(out Row, Col: Integer): Boolean;
+var
+  Old, Raw : TTermios;
+  Buf      : array[0..63] of Char;
+  Got, i, j: Integer;
+  Reply    : AnsiString;
+  Tries    : Integer;
+  V, Code  : Integer;
+begin
+  Result := False;
+  Row := 0;
+  Col := 0;
+  if TCGetAttr(0, Old) <> 0 then Exit;
+
+  Raw := Old;
+  { Unbuffered and unechoed, with a tenth of a second per read, so a
+    terminal that never replies costs a moment rather than the session. }
+  Raw.c_lflag := Raw.c_lflag and not (ICANON or ECHO);
+  Raw.c_cc[VMIN]  := 0;
+  Raw.c_cc[VTIME] := 1;
+  if TCSetAttr(0, TCSANOW, Raw) <> 0 then Exit;
+
+  try
+    Write(#27'[6n');
+    Flush(Output);
+
+    Reply := '';
+    for Tries := 1 to 5 do
+    begin
+      Got := FpRead(0, Buf, SizeOf(Buf));
+      if Got > 0 then
+      begin
+        SetLength(Reply, Length(Reply) + Got);
+        Move(Buf, Reply[Length(Reply) - Got + 1], Got);
+        if Pos('R', Reply) > 0 then Break;
+      end;
+    end;
+  finally
+    TCSetAttr(0, TCSANOW, Old);
+  end;
+
+  { The answer is ESC [ row ; col R, possibly with other input around it. }
+  j := 0;
+  for i := Length(Reply) downto 2 do
+    if (Reply[i] = 'R') and (j = 0) then j := i;
+  if j = 0 then Exit;
+
+  i := j;
+  while (i > 1) and not ((Reply[i] = #27) and (i + 1 <= Length(Reply)) and
+                         (Reply[i + 1] = '[')) do
+    Dec(i);
+  if (i < 1) or (Reply[i] <> #27) then Exit;
+
+  Reply := Copy(Reply, i + 2, j - i - 2);      { "row;col" }
+  i := Pos(';', Reply);
+  if i = 0 then Exit;
+
+  Val(Copy(Reply, 1, i - 1), V, Code);
+  if (Code <> 0) or (V < 1) then Exit;
+  Row := V;
+  Val(Copy(Reply, i + 1, Length(Reply)), V, Code);
+  if (Code <> 0) or (V < 1) then Exit;
+  Col := V;
+  Result := True;
+end;
+
+{ Remember where the console's cursor is, while we are looking at it. }
+procedure NoteConsoleCursor;
+var
+  R, C: Integer;
+begin
+  if QueryCursor(R, C) then
+  begin
+    ConsoleRow := R;
+    ConsoleCol := C;
+  end;
+end;
+{$ELSE}
+procedure NoteConsoleCursor;
+begin
+end;
+{$ENDIF}
 
 { Append the elements of B to A. }
 procedure Append(var A: TStringArray; const B: array of AnsiString);
@@ -143,6 +260,16 @@ begin
   {$IFDEF UNIX}
   HaveTIOS := TCGetAttr(0, SavedTIOS) = 0;
   {$ENDIF}
+  { The first switch to the alternate screen is made by the video driver
+    inside the inherited Init, so the console's cursor has to be put away
+    before that for the first console run to come back to the right place. }
+  if Smcup <> '' then
+  begin
+    NoteConsoleCursor;
+    Write(CursorSave);
+    Flush(Output);
+  end;
+  DebugScreenSwitch;
 
   inherited Init;
 
@@ -671,6 +798,7 @@ begin
   WriteLn(F, 'tput=', FindOnPath('tput'));
   WriteLn(F, 'smcup=[', Hex(Smcup), ']');
   WriteLn(F, 'rmcup=[', Hex(Rmcup), ']');
+  WriteLn(F, 'console cursor=', ConsoleRow, ';', ConsoleCol);
   CloseFile(F);
   {$I+}
   if IOResult <> 0 then ;
@@ -704,7 +832,6 @@ begin
     Smcup := '';
     Rmcup := '';
   end;
-  DebugScreenSwitch;
 end;
 
 { Hand the terminal back to the console.
@@ -739,6 +866,11 @@ begin
     if HaveTIOS then TCSetAttr(0, TCSANOW, SavedTIOS);
     {$ENDIF}
     Write(Rmcup);
+    if ConsoleRow > 0 then
+      Write(#27'[', ConsoleRow, ';', ConsoleCol, 'H')
+    else
+      { Nothing to go on; the terminal's own save slot is all we have. }
+      Write(CursorRestore);
     Flush(Output);
   end
   else
@@ -762,7 +894,8 @@ begin
       next visit and hands back a cleared screen, so the repaint that
       follows has to be unconditional whatever the video unit believes is
       still up there. }
-    Write(Smcup);
+    NoteConsoleCursor;
+    Write(CursorSave, Smcup);
     Flush(Output);
     Drivers.InitKeyboard;
     InitEvents;
