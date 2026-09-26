@@ -253,6 +253,37 @@ S=$(screen)
 check "Enter leaves the user screen" "$S" "File  Edit  Search  Run"
 stop
 
+# A second console run must carry on below the first rather than starting
+# again at the top of the screen and painting over it.
+cat > "$TMPDIR_T/twice.pl" <<'EOF'
+$| = 1;
+print "MARKER-$ARGV[0]\n";
+EOF
+start "$TMPDIR_T/twice.pl"
+keys M-r
+DELAY=3 keys c
+DELAY=2 keys Enter
+keys M-r
+DELAY=3 keys c
+S=$(screen)
+COUNT=$(printf '%s' "$S" | grep -c "MARKER")
+if [ "$COUNT" -ge 2 ]; then
+    PASS=$((PASS + 1)); echo "ok   a second console run appends below the first"
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL a second console run appends below the first (found $COUNT of 2)"
+    printf '%s\n' "$S" | sed 's/^/       | /'
+fi
+# Nothing should be stepping diagonally across the screen: every line the
+# IDE wrote has to start hard against the left margin.
+if printf '%s' "$S" | grep -qE '^[[:space:]]+--- TurboPerl'; then
+    FAIL=$((FAIL + 1)); echo "FAIL console output starts at the left margin"
+else
+    PASS=$((PASS + 1)); echo "ok   console output starts at the left margin"
+fi
+DELAY=2 keys Enter
+stop
+
 # ------------------------------------------------------------- 11. quitting
 start "$TMPDIR_T/good.pl"
 DELAY=2 keys M-x

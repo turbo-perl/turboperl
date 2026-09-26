@@ -13,7 +13,7 @@ interface
 uses
   Objects, Drivers, Views, Menus, App, MsgBox, StdDlg, Editors,
   FVConsts, Gadgets, Video,
-  {$IFDEF UNIX} BaseUnix, {$ENDIF}
+  {$IFDEF UNIX} BaseUnix, TermIO, {$ENDIF}
   SysUtils, Classes,
   TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText;
 
@@ -45,7 +45,7 @@ type
 
     { --- running --- }
     procedure RunScript(OnConsole: Boolean);
-    procedure WaitForEnter(const Prompt: AnsiString; AtBottom: Boolean = False);
+    procedure WaitForEnter(const Prompt: AnsiString; Erase: Boolean = False);
     procedure SyntaxCheck;
     procedure RunTidy;
     procedure RunCritic;
@@ -73,6 +73,7 @@ type
     procedure SuspendScreen;
     procedure ResumeScreen;
     procedure ShowUserScreen;
+
     procedure Complain(const S: AnsiString);
     function  NextWindowNumber: Integer;
   end;
@@ -83,7 +84,30 @@ const
   { How long a tool may take before we give up on it. }
   ToolTimeoutMs = 120 * 1000;
 
+{ ---------------------------------------------------------------------------
+  Terminal state captured before the IDE takes the screen over.
+
+  These are deliberately unit variables rather than fields of TTurboPerl.
+  Turbo Vision's TObject.Init clears every data field of the object it is
+  constructing, so anything stored in the application object before the
+  inherited Init runs is wiped - and this has to be collected first, while
+  the terminal is still the console's.
+  --------------------------------------------------------------------------- }
+var
+  { The terminal's own enter/leave alternate screen sequences, empty when it
+    has none.  See DetectScreenSwitch. }
+  Smcup : AnsiString = '';
+  Rmcup : AnsiString = '';
+  {$IFDEF UNIX}
+  { The terminal settings as the shell had them, so a console run gets the
+    console back exactly as it was. }
+  SavedTIOS : TTermios;
+  HaveTIOS  : Boolean = False;
+  {$ENDIF}
+
 { -------------------------------------------------------------------------- }
+
+procedure DetectScreenSwitch; forward;
 
 { Append the elements of B to A. }
 procedure Append(var A: TStringArray; const B: array of AnsiString);
@@ -113,11 +137,19 @@ begin
   else
     EditorFlags := EditorFlags and not efBackupFiles;
 
+  { Both of these read the terminal as the shell left it, so they have to
+    run before the drivers take it over. }
+  DetectScreenSwitch;
+  {$IFDEF UNIX}
+  HaveTIOS := TCGetAttr(0, SavedTIOS) = 0;
+  {$ENDIF}
+
+  inherited Init;
+
+  { Only now: TObject.Init has just cleared every field of this object. }
   WinNum   := 0;
   LastDoc  := '';
   LastKind := dkTopic;
-
-  inherited Init;
 
   GetExtent(R);
   R.A.X := R.B.X - 9;
@@ -581,30 +613,136 @@ begin
 end;
 {$ENDIF}
 
-{ Print a prompt on the bare terminal and wait for a real Enter.
+{ Print a prompt on the console and wait for a real Enter.
 
-  AtBottom parks the prompt on the last line first.  After stepping off the
-  IDE's display the cursor sits at the top, so printing there would scroll
-  away the very output the user asked to look at. }
-procedure TTurboPerl.WaitForEnter(const Prompt: AnsiString; AtBottom: Boolean);
+  Erase takes the prompt back off again afterwards, so that visiting the
+  user screen repeatedly does not leave a trail of them down the console. }
+procedure TTurboPerl.WaitForEnter(const Prompt: AnsiString; Erase: Boolean);
 begin
-  if AtBottom then
-    { Row 999 clamps to the last line on any terminal able to run the IDE. }
-    Write(#27'[999;1H')
-  else
-    WriteLn;
+  WriteLn;
   Write(Prompt);
   Flush(Output);
   DrainPendingInput;
   ReadLn;
+  if Erase then
+  begin
+    { Enter echoed a newline, so the cursor is a line below the prompt:
+      step up over the prompt and the blank line and clear both. }
+    Write(#27'[1A'#27'[2K'#13, #27'[1A'#27'[2K'#13);
+    Flush(Output);
+  end;
 end;
 
+{ Ask the terminal how it switches to and from its alternate screen.
+
+  Free Pascal's video driver puts the IDE on that screen when terminfo says
+  there is one, and the terminal then keeps the console's contents and
+  cursor safe underneath.  Where there is no alternate screen - the Linux
+  console and plain vt100 among them - the IDE and the console share one
+  screen and there is nothing to preserve.
+
+  Asking tput rather than hard coding the xterm sequences means the right
+  thing happens on both, and the escape codes come from the terminal's own
+  description.  If tput is missing both come back empty and the ordinary
+  DoneVideo path is used. }
+{ Set TURBOPERL_DEBUG to a file name to have the detected sequences and the
+  terminal type written there; useful when a console run misbehaves on a
+  terminal that is not to hand. }
+procedure DebugScreenSwitch;
+var
+  F: TextFile;
+  H: AnsiString;
+
+  function Hex(const A: AnsiString): AnsiString;
+  var
+    i: Integer;
+  begin
+    Result := '';
+    for i := 1 to Length(A) do Result := Result + IntToHex(Ord(A[i]), 2) + ' ';
+  end;
+
+begin
+  H := GetEnvironmentVariable('TURBOPERL_DEBUG');
+  if H = '' then Exit;
+  AssignFile(F, H);
+  {$I-}
+  Rewrite(F);
+  WriteLn(F, 'TERM=', GetEnvironmentVariable('TERM'));
+  WriteLn(F, 'tput=', FindOnPath('tput'));
+  WriteLn(F, 'smcup=[', Hex(Smcup), ']');
+  WriteLn(F, 'rmcup=[', Hex(Rmcup), ']');
+  CloseFile(F);
+  {$I+}
+  if IOResult <> 0 then ;
+end;
+
+procedure DetectScreenSwitch;
+var
+  R: TRunResult;
+  T: AnsiString;
+begin
+  Smcup := '';
+  Rmcup := '';
+  T := FindOnPath('tput');
+  if T = '' then Exit;
+
+  R := RunCaptured(T, ['smcup'], '', '', 3000);
+  if not R.Launched then Exit;
+  if R.ExitCode <> 0 then Exit;
+  Smcup := R.Output;
+
+  R := RunCaptured(T, ['rmcup'], '', '', 3000);
+  if (not R.Launched) or (R.ExitCode <> 0) then
+  begin
+    Smcup := '';
+    Exit;
+  end;
+  Rmcup := R.Output;
+
+  if (Smcup = '') or (Rmcup = '') then
+  begin
+    Smcup := '';
+    Rmcup := '';
+  end;
+  DebugScreenSwitch;
+end;
+
+{ Hand the terminal back to the console.
+
+  On a terminal with an alternate screen this deliberately does not call
+  DoneVideo.  DoneVideo does leave that screen correctly - the terminal
+  restores the console's contents and its cursor along with it - but it
+  then homes the cursor, so everything written next lands on top of
+  whatever the console already held.  That is why a console run used to
+  start at the top of the screen and paint over the run before it.
+
+  Doing the switch here instead leaves the cursor where the console left
+  it, so successive runs carry on below one another the way Turbo Pascal's
+  user screen did.
+
+  Without an alternate screen there is no console image to go back to - the
+  IDE has been drawing straight over it - so DoneVideo, which clears, is
+  exactly right. }
 procedure TTurboPerl.SuspendScreen;
 begin
   DoneSysError;
   DoneEvents;
-  Drivers.DoneVideo;
   Drivers.DoneKeyboard;
+  if Rmcup <> '' then
+  begin
+    { Put the terminal back the way the shell had it.  DoneKeyboard on its
+      own leaves output translation off, so the newlines written by the
+      script would step diagonally down the screen instead of returning to
+      the left margin.  DoneVideo is what normally restores this, and the
+      whole point here is not to call it. }
+    {$IFDEF UNIX}
+    if HaveTIOS then TCSetAttr(0, TCSANOW, SavedTIOS);
+    {$ENDIF}
+    Write(Rmcup);
+    Flush(Output);
+  end
+  else
+    Drivers.DoneVideo;
 end;
 
 { Turbo Pascal's user screen: step off the IDE's display and back onto the
@@ -618,13 +756,29 @@ end;
 
 procedure TTurboPerl.ResumeScreen;
 begin
-  Drivers.InitKeyboard;
-  Drivers.InitVideo;
+  if Smcup <> '' then
+  begin
+    { Re-entering the alternate screen stores the console's cursor for the
+      next visit and hands back a cleared screen, so the repaint that
+      follows has to be unconditional whatever the video unit believes is
+      still up there. }
+    Write(Smcup);
+    Flush(Output);
+    Drivers.InitKeyboard;
+    InitEvents;
+    InitSysError;
+  end
+  else
+  begin
+    Drivers.InitKeyboard;
+    Drivers.InitVideo;
+    InitScreen;
+    InitEvents;
+    InitSysError;
+  end;
   Video.SetCursorType(crHidden);
-  InitScreen;
-  InitEvents;
-  InitSysError;
   Redraw;
+  Video.UpdateScreen(True);
 end;
 
 procedure TTurboPerl.RunScript(OnConsole: Boolean);

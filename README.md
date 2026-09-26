@@ -102,9 +102,18 @@ input buffer first — a stray mouse report or a queued keystroke would
 otherwise satisfy that prompt and take the output away before it could be
 read. `Alt-F5` goes back to the terminal at any time.
 
+Successive runs carry on below one another: the IDE lives on the terminal's
+alternate screen, and stepping off it by hand — rather than through
+`DoneVideo`, which homes the cursor afterwards — leaves the console exactly
+where it was, scrollback and all. Terminals with no alternate screen (the
+Linux console, plain vt100) share one screen with the IDE, so there the
+console is cleared on the way out, as it has to be.
+
 If the output still never appears, run with the default `capture` mode
 instead: it collects stdout and stderr into the Output window, where they
-stay until cleared.
+stay until cleared. Setting `TURBOPERL_DEBUG` to a file name makes the IDE
+write the terminal type and the screen-switch sequences it detected there,
+which is the first thing to check when a console run misbehaves.
 
 ## Settings
 
