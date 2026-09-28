@@ -8,21 +8,7 @@ It is a full screen terminal application: menu bar across the top, status
 line along the bottom, overlapping windows in between, and the muscle memory
 of a 1992 Borland IDE pointed at a modern perl.
 
-```
- File  Edit  Search  Run  Tools  Options  Window  Help              14:38:34
-╔═[■]══════════════════════ ~/src/hello.pl ══════════════════════════1═[↕]═╗
-║#!/usr/bin/perl                                                           ▲
-║use strict;                                                               ▓
-║use warnings;                                                             ▓
-║                                                                          ▓
-║my @greetings = qw(Hello Salut Hallo Ciao);                               ▓
-║                                                                          ▓
-║for my $g (@greetings) {                                                  ▓
-║    printf "%-6s is %s\n", $g, $where{$g} // 'a mystery';                 ▓
-║}                                                                         ▼
-╚═══════ 8:1 ══════◄▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓►──┘
- F2 Save  F3 Open  F9 Check  Ctrl-F9 Run  Alt-F3 Close  Alt-X Exit
-```
+![TurboPerl editing hello.pl](docs/hello.png)
 
 ## What it does
 
