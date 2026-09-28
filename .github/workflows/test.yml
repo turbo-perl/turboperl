@@ -19,13 +19,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            fpc fp-units-fv tmux perl perl-doc
+            fpc fp-units-fv tmux perl perl-doc cpanminus
+
+      # The integrated debugger drives Devel::ebug, which is not packaged
+      # for Ubuntu.  --notest because its own suite wants Expect and a
+      # terminal, which is not what is being tested here.
+      - name: Install Devel::ebug
+        run: sudo cpanm --notest --quiet Devel::ebug
 
       - name: Versions
         run: |
           fpc -iV
           tmux -V
           perl -v | sed -n 2p
+          perl -MDevel::ebug -e 'print "Devel::ebug $Devel::ebug::VERSION\n"'
 
       - name: Build
         run: make

@@ -46,6 +46,7 @@ type
     FProc     : TProcess;
     FState    : TDebugState;
     FInbox    : AnsiString;      { bytes read but not yet a whole line }
+    FStderr   : AnsiString;      { whatever the bridge complained about  }
     FSeq      : Integer;
     FPending  : TFPList;         { parsed messages not yet consumed    }
     FError    : AnsiString;
@@ -66,6 +67,7 @@ type
     FChanged  : Boolean;
 
     procedure Drain;
+    procedure DrainStderr;
     function  NextMessage: TJSONObject;
     procedure Apply(Msg: TJSONObject);
     function  WaitFor(const Ev: AnsiString; TimeoutMs: Integer): TJSONObject;
@@ -340,6 +342,7 @@ begin
 
   FState   := dsStarting;
   FInbox   := '';
+  FStderr  := '';
   FOutput  := '';
   FChanged := True;
 
@@ -378,8 +381,17 @@ begin
   Msg := WaitFor('stopped', 30000);
   if Msg = nil then
   begin
+    DrainStderr;
     if FError = '' then
-      FError := 'the debugger did not start; check the perl path under Options';
+    begin
+      if Trim(FStderr) <> '' then
+        { Almost always the real explanation: Devel::ebug not installed, or
+          the program failing to compile under the debugger. }
+        FError := 'the debugger did not start: ' + Trim(Copy(FStderr, 1, 300))
+      else
+        FError := 'the debugger did not start, and said nothing about why; ' +
+                  'check that Devel::ebug is installed for ' + Cfg.PerlExe;
+    end;
     Stop;
     Exit(False);
   end;
@@ -421,6 +433,30 @@ end;
 {  Reading                                                                    }
 { -------------------------------------------------------------------------- }
 
+{ The bridge's stderr has to be read whether or not anyone wants it: left
+  alone it fills its pipe and the bridge stops dead.  It is also the only
+  place a startup failure explains itself - a missing Devel::ebug, say. }
+procedure TDebugSession.DrainStderr;
+var
+  Buf  : array[0..4095] of Byte;
+  Got  : LongInt;
+  Avail: LongInt;
+  Chunk: AnsiString;
+begin
+  if FProc = nil then Exit;
+  while True do
+  begin
+    Avail := FProc.Stderr.NumBytesAvailable;
+    if Avail <= 0 then Break;
+    if Avail > SizeOf(Buf) then Avail := SizeOf(Buf);
+    Got := FProc.Stderr.Read(Buf, Avail);
+    if Got <= 0 then Break;
+    SetLength(Chunk, Got);
+    Move(Buf, Chunk[1], Got);
+    if Length(FStderr) < 8192 then FStderr := FStderr + Chunk;
+  end;
+end;
+
 procedure TDebugSession.Drain;
 var
   Buf   : array[0..8191] of Byte;
@@ -432,6 +468,7 @@ var
   D     : TJSONData;
 begin
   if FProc = nil then Exit;
+  DrainStderr;
 
   while True do
   begin
