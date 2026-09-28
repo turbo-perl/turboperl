@@ -131,6 +131,44 @@ procedure DetectScreenSwitch; forward;
 procedure DebugScreenSwitch; forward;
 
 {$IFDEF UNIX}
+{ Free Pascal's video driver recognises a terminal by the start of its name
+  and has never heard of tmux, so under tmux-256color - tmux's own default -
+  it falls back to plain ANSI and draws every bright colour as bold on top of
+  the dim one.  tmux emulates screen, so the driver is shown screen's name
+  while it looks, and the real one is put back before anything is run. }
+var
+  TermSlot : PPChar = nil;
+  RealTerm : PChar  = nil;
+  FakeTerm : AnsiString;
+
+procedure HideTmux;
+var
+  E: PPChar;
+begin
+  E := envp;
+  if E = nil then Exit;
+  while E^ <> nil do
+  begin
+    if StrLComp(E^, 'TERM=tmux', 9) = 0 then
+    begin
+      TermSlot := E;
+      RealTerm := E^;
+      FakeTerm := 'TERM=screen' + StrPas(E^ + 9) + #0;
+      E^ := PChar(FakeTerm);
+      Exit;
+    end;
+    Inc(E);
+  end;
+end;
+
+procedure ShowTmux;
+begin
+  if TermSlot <> nil then TermSlot^ := RealTerm;
+  TermSlot := nil;
+end;
+{$ENDIF}
+
+{$IFDEF UNIX}
 { Ask the terminal where its cursor is, with a device status report.
 
   This is the only dependable way to get the console's cursor back after a
@@ -271,7 +309,9 @@ begin
   end;
   DebugScreenSwitch;
 
+  {$IFDEF UNIX} HideTmux; {$ENDIF}
   inherited Init;
+  {$IFDEF UNIX} ShowTmux; {$ENDIF}
 
   { Only now: TObject.Init has just cleared every field of this object. }
   WinNum   := 0;
