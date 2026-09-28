@@ -625,7 +625,6 @@ var
 begin
   GetExtent(R);
   R.A.Y := R.B.Y - 1;
-  R.B.X := R.B.X - 9;
   StatusLine := New(PStatusLine, Init(R,
     NewStatusDef(0, $FFFF,
       NewStatusKey('~F2~ Save',    kbF2,     cmSave,
