@@ -64,6 +64,11 @@ function TokColour(T: TPerlTok): Byte;
 { Where the bundled perl library lives, '' when it cannot be found. }
 function DetectLibDir: AnsiString;
 
+{ A path for showing, with the home directory written as ~.  The second
+  form takes the home directory rather than asking $HOME, for testing. }
+function TildePath(const Path: AnsiString): AnsiString;
+function TildePath(const Path, Home: AnsiString): AnsiString;
+
 implementation
 
 uses
@@ -151,6 +156,25 @@ begin
   Home := GetEnvironmentVariable('HOME');
   if Home = '' then Home := GetCurrentDir;
   Result := IncludeTrailingPathDelimiter(Home) + '.turboperlrc';
+end;
+
+function TildePath(const Path: AnsiString): AnsiString;
+begin
+  Result := TildePath(Path, GetEnvironmentVariable('HOME'));
+end;
+
+function TildePath(const Path, Home: AnsiString): AnsiString;
+var
+  H: AnsiString;
+begin
+  Result := Path;
+  H := ExcludeTrailingPathDelimiter(Home);
+  { An empty $HOME, or one of /, would make ~ of everything. }
+  if H = '' then Exit;
+  if Path = H then
+    Result := '~'
+  else if Copy(Path, 1, Length(H) + 1) = H + PathDelim then
+    Result := '~' + Copy(Path, Length(H) + 1, Length(Path));
 end;
 
 function BoolStr(B: Boolean): AnsiString;

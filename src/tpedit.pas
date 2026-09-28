@@ -744,7 +744,7 @@ begin
     Exit('Clipboard');
   if (Editor = nil) or (Editor^.FileName = '') then
     Exit('Untitled');
-  S := Editor^.FileName;
+  S := TildePath(Editor^.FileName);
   { Show the tail of a long path rather than the head; the file name is the
     part that tells one window from another. }
   if Length(S) > MaxSize then

@@ -94,6 +94,16 @@ begin
   Check('a missing file is not an error', not LoadConfig);
   Check('defaults are in place', Cfg.TabSize = 4);
 
+  { Paths under the home directory are shown with a ~. }
+  Check('home is ~', TildePath('/home/pat', '/home/pat') = '~');
+  Check('a file at home', TildePath('/home/pat/x.pl', '/home/pat') = '~/x.pl');
+  Check('a trailing / on $HOME', TildePath('/home/pat/src/x.pl', '/home/pat/') = '~/src/x.pl');
+  Check('only a whole directory name matches',
+        TildePath('/home/patricia/x.pl', '/home/pat') = '/home/patricia/x.pl');
+  Check('elsewhere is left alone', TildePath('/etc/x.pl', '/home/pat') = '/etc/x.pl');
+  Check('a $HOME of / changes nothing', TildePath('/etc/x.pl', '/') = '/etc/x.pl');
+  Check('no $HOME changes nothing', TildePath('/etc/x.pl', '') = '/etc/x.pl');
+
   WriteLn;
   if Fails = 0 then WriteLn('all settings tests passed')
   else begin WriteLn(Fails, ' FAILURES'); Halt(1); end;
