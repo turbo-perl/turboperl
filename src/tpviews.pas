@@ -67,6 +67,7 @@ type
     function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
     procedure   SelectItem(Item: Sw_Integer); virtual;
     procedure   HandleEvent(var Event: TEvent); virtual;
+    function    GetPalette: PPalette; virtual;
     procedure   SetMessages(const M: TPerlMsgList);
     procedure   Clear;
     function    Current: TMsgItem;
@@ -88,6 +89,7 @@ type
     constructor Init(var Bounds: Objects.TRect; AHScrollBar, AVScrollBar: PScrollBar);
     destructor  Done; virtual;
     function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
+    function    GetPalette: PPalette; virtual;
     procedure   SelectItem(Item: Sw_Integer); virtual;
     procedure   HandleEvent(var Event: TEvent); virtual;
     procedure   Clear;
@@ -117,6 +119,16 @@ type
   end;
 
 implementation
+
+{ TListViewer's own palette (26..29) indexes a dialog's, which a plain window
+  does not have: every colour falls off the end and comes out as ErrorAttr,
+  blinking white on red.  These lists live in windows, so map onto the
+  window's palette instead - its scroller text (6) and selected text (7),
+  the same colours as the Output window, with the active frame (2) for the
+  column divider. }
+const
+  CWindowList = #6#6#7#6#2;
+
 
 { ========================================================================== }
 {  TOutputView                                                               }
@@ -327,6 +339,13 @@ begin
   Result := S;
 end;
 
+function TMsgView.GetPalette: PPalette;
+const
+  P: String[Length(CWindowList)] = CWindowList;
+begin
+  Result := PPalette(@P);
+end;
+
 function TMsgView.Current: TMsgItem;
 begin
   Result := nil;
@@ -450,6 +469,13 @@ begin
   AFile := Copy(S, 1, P - 1);
   ALine := StrToIntDef(Copy(S, P + 1, Length(S)), 0);
   Result := (AFile <> '') and (ALine > 0);
+end;
+
+function TInfoView.GetPalette: PPalette;
+const
+  P: String[Length(CWindowList)] = CWindowList;
+begin
+  Result := PPalette(@P);
 end;
 
 procedure TInfoView.SelectItem(Item: Sw_Integer);
