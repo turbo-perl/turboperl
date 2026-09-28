@@ -227,7 +227,8 @@ end;
 type
   TEditOptRec = packed record
     TabSize : String[4];
-    Flags   : Sw_Word;   { 1 autoindent, 2 backup, 4 real tabs, 8 highlight }
+    Flags   : Sw_Word;   { 1 autoindent, 2 backup, 4 real tabs, 8 highlight,
+                           16 VGA palette }
     Scheme  : Sw_Word;
   end;
 
@@ -237,19 +238,20 @@ var
   R  : Objects.TRect;
   Rec: TEditOptRec;
 begin
-  R.Assign(0, 0, 62, 20);
+  R.Assign(0, 0, 62, 21);
   D := New(PDialog, Init(R, 'Editor Options'));
   D^.Options := D^.Options or ofCentered;
 
   R.Assign(3, 3, 9, 4);
   AddInput(D, R, '~T~ab size', 4, 0);
 
-  R.Assign(3, 6, 32, 10);
+  R.Assign(3, 6, 34, 11);
   D^.Insert(New(PCheckBoxes, Init(R,
     NewSItem('~A~uto indent',
     NewSItem('Create ~b~ackup files',
     NewSItem('Insert ~r~eal tab characters',
-    NewSItem('~S~yntax highlighting', nil)))))));
+    NewSItem('~S~yntax highlighting',
+    NewSItem('Classic ~V~GA palette', nil))))))));
 
   R.Assign(36, 6, 58, 9);
   D^.Insert(New(PRadioButtons, Init(R,
@@ -260,14 +262,14 @@ begin
   R.Assign(36, 5, 58, 6);
   D^.Insert(New(PStaticText, Init(R, 'Colour scheme:')));
 
-  R.Assign(3, 11, 58, 16);
+  R.Assign(3, 12, 58, 17);
   D^.Insert(New(PStaticText, Init(R,
     'Turning off real tab characters makes the Tab key insert' + #13 +
     'spaces up to the next tab stop.' + #13 + #13 +
     'Custom colours are edited in ~/.turboperlrc, under the' + #13 +
     'colour.* keys; save options first to write them out.')));
 
-  AddButtons(D, 17);
+  AddButtons(D, 18);
   D^.SelectNext(False);
 
   Rec.TabSize := IntStr(Cfg.TabSize);
@@ -276,6 +278,7 @@ begin
   if Cfg.BackupFiles then Rec.Flags := Rec.Flags or 2;
   if Cfg.UseTabChar  then Rec.Flags := Rec.Flags or 4;
   if Cfg.Highlight   then Rec.Flags := Rec.Flags or 8;
+  if Cfg.VgaPalette  then Rec.Flags := Rec.Flags or 16;
   Rec.Scheme := Cfg.Scheme;
 
   Result := Application^.ExecuteDialog(D, @Rec) <> cmCancel;
@@ -288,6 +291,7 @@ begin
     Cfg.BackupFiles := (Rec.Flags and 2) <> 0;
     Cfg.UseTabChar  := (Rec.Flags and 4) <> 0;
     Cfg.Highlight   := (Rec.Flags and 8) <> 0;
+    Cfg.VgaPalette  := (Rec.Flags and 16) <> 0;
     Cfg.Scheme      := Rec.Scheme;
     if Cfg.Scheme > 2 then Cfg.Scheme := 0;
   end;

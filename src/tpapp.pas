@@ -186,6 +186,50 @@ begin
 end;
 {$ENDIF}
 
+{ The sixteen colours as a VGA card showed them, which is what Turbo Pascal
+  was drawn in.  Terminals are free to show the ANSI colours however they
+  like, and modern schemes do: Konsole's Breeze makes blue a bright sky blue
+  that its cyan and green comments all but vanish into.  So while the IDE
+  has the screen the terminal is told, with OSC 4, to use the VGA colours,
+  and told with OSC 104 to go back to its own the moment anything else is
+  shown - a console run, the user screen, or the shell after Alt-X.
+
+  The table is in ANSI order, not VGA order: red is 1 and blue is 4.  The
+  Linux console already uses these colours and does not understand OSC 4,
+  so it is left alone. }
+const
+  VgaRGB : array[0..15] of String[8] = (
+    '00/00/00', 'aa/00/00', '00/aa/00', 'aa/55/00',
+    '00/00/aa', 'aa/00/aa', '00/aa/aa', 'aa/aa/aa',
+    '55/55/55', 'ff/55/55', '55/ff/55', 'ff/ff/55',
+    '55/55/ff', 'ff/55/ff', '55/ff/ff', 'ff/ff/ff');
+
+var
+  PaletteSet : Boolean = False;
+
+procedure SetVgaPalette;
+var
+  i: Integer;
+  S: AnsiString;
+begin
+  if not Cfg.VgaPalette then Exit;
+  if Copy(GetEnvironmentVariable('TERM'), 1, 5) = 'linux' then Exit;
+  S := #27']4';
+  for i := 0 to 15 do
+    S := S + ';' + IntToStr(i) + ';rgb:' + VgaRGB[i];
+  Write(S, #7);
+  Flush(Output);
+  PaletteSet := True;
+end;
+
+procedure RestorePalette;
+begin
+  if not PaletteSet then Exit;
+  Write(#27']104'#7);
+  Flush(Output);
+  PaletteSet := False;
+end;
+
 {$IFDEF UNIX}
 { Ask the terminal where its cursor is, with a device status report.
 
@@ -330,6 +374,7 @@ begin
   {$IFDEF UNIX} HideTmux; {$ENDIF}
   inherited Init;
   {$IFDEF UNIX} ShowTmux; {$ENDIF}
+  SetVgaPalette;
 
   { Only now: TObject.Init has just cleared every field of this object. }
   WinNum   := 0;
@@ -955,6 +1000,7 @@ begin
   DoneSysError;
   DoneEvents;
   Drivers.DoneKeyboard;
+  RestorePalette;
   if Rmcup <> '' then
   begin
     { Put the terminal back the way the shell had it.  DoneKeyboard on its
@@ -1009,6 +1055,7 @@ begin
     InitEvents;
     InitSysError;
   end;
+  SetVgaPalette;
   Video.SetCursorType(crHidden);
   Redraw;
   Video.UpdateScreen(True);
@@ -1763,6 +1810,8 @@ begin
       begin
         if ExecEditorOptionsDialog then
         begin
+          RestorePalette;
+          SetVgaPalette;
           if Cfg.BackupFiles then
             EditorFlags := EditorFlags or efBackupFiles
           else
@@ -1898,5 +1947,9 @@ begin
   { These never depend on context. }
   EnableCommands([cmRunArgs, cmClearOutput]);
 end;
+
+finalization
+  { However the IDE ends, the shell gets its own colours back. }
+  RestorePalette;
 
 end.
