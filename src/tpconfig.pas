@@ -38,6 +38,7 @@ type
     Highlight     : Boolean;
     Scheme        : Integer;        { 0 classic, 1 quiet, 2 custom }
     Colours       : array[TPerlTok] of Byte;
+    VgaPalette    : Boolean;        { show the terminal's colours as VGA did }
 
     { --- external tools --- }
     TidyExe       : AnsiString;
@@ -120,6 +121,7 @@ begin
   Cfg.Scheme      := 0;
   for T := Low(TPerlTok) to High(TPerlTok) do
     Cfg.Colours[T] := DefaultScheme[T];
+  Cfg.VgaPalette  := True;
 
   Cfg.TidyExe        := FindOnPath('perltidy');
   Cfg.TidyArgs       := '-q';
@@ -231,6 +233,7 @@ begin
     else if Key = 'usetabchar'      then Cfg.UseTabChar     := StrBool(V, False)
     else if Key = 'highlight'       then Cfg.Highlight      := StrBool(V, True)
     else if Key = 'scheme'          then Cfg.Scheme         := StrInt(V, 0)
+    else if Key = 'vgapalette'      then Cfg.VgaPalette     := StrBool(V, True)
     else if Key = 'tidy'            then Cfg.TidyExe        := V
     else if Key = 'tidyargs'        then Cfg.TidyArgs       := V
     else if Key = 'critic'          then Cfg.CriticExe      := V
@@ -311,6 +314,8 @@ begin
   WriteLn(F, 'highlight      = ', BoolStr(Cfg.Highlight));
   WriteLn(F, '# scheme: 0 classic, 1 quiet, 2 custom');
   WriteLn(F, 'scheme         = ', Cfg.Scheme);
+  WriteLn(F, '# vgapalette switches the terminal to the VGA colours while the IDE is up');
+  WriteLn(F, 'vgapalette     = ', BoolStr(Cfg.VgaPalette));
   WriteLn(F, '# custom colours are used when scheme = 2; values are 0..15');
   for T := Low(TPerlTok) to High(TPerlTok) do
     WriteLn(F, 'colour.', LowerCase(TokName[T]),
