@@ -21,7 +21,7 @@ interface
 uses
   Objects, Drivers, Views, Editors, FVConsts,
   SysUtils,
-  TPConst, TPHilite, TPConfig, TPText;
+  TPConst, TPHilite, TPConfig, TPText, TPDebug;
 
 const
   { One entry per screen column of a formatted line. }
@@ -68,6 +68,13 @@ type
       unshifted cursor key can turn it off again without disturbing the
       Ctrl-K B style persistent block marking. }
     FShiftSel : Boolean;
+
+    { The line number of the line at FLnPtr.  Kept the same way as the
+      scanner state below, and separately from it, because the debugger's
+      markers have to be drawn whether or not highlighting is on. }
+    FLnPtr   : Sw_Word;
+    FLnNum   : Integer;
+    FLnValid : Boolean;
 
     { Cached scanner state.  FStPtr is the buffer offset the state applies
       to, which lets consecutive lines of a redraw resume in constant time.
@@ -122,6 +129,9 @@ constructor TPerlEditor.Init(var Bounds: TRect;
 begin
   FStValid  := False;
   FStPtr    := 0;
+  FLnValid  := False;
+  FLnPtr    := 0;
+  FLnNum    := 1;
   FShiftSel := False;
   InitPerlState(FState);
   inherited Init(Bounds, AHScrollBar, AVScrollBar, AIndicator, AFileName);
@@ -138,6 +148,7 @@ end;
 procedure TPerlEditor.InvalidateHighlight;
 begin
   FStValid := False;
+  FLnValid := False;
 end;
 
 { -------------------------------------------------------------------------- }
@@ -461,6 +472,7 @@ begin
     walk from the top of the buffer to the first visible line, after which
     the rest of the screen resumes incrementally. }
   FStValid := False;
+  FLnValid := False;
   inherited Draw;
 end;
 
@@ -472,6 +484,8 @@ var
   Cells   : array[0..MaxCells - 1] of Word;
   RawLen  : Integer;
   Trunc   : Boolean;
+  LineNo  : Integer;
+  MarkAttr: Byte;
   EolPos  : Sw_Word;
   St      : TPerlState;
   NormAttr, SelAttr, BG, A: Byte;
@@ -493,6 +507,30 @@ begin
   DoHi     := Cfg.Highlight;
 
   ReadLine(LinePtr, Raw, RawLen, EolPos, Trunc);
+
+  { Which line is this?  Resumed from the previous one during a redraw, the
+    same way the scanner state is, so only the first line of a screen pays
+    for the walk from the top of the buffer. }
+  if FLnValid and (FLnPtr = LinePtr) then
+    LineNo := FLnNum
+  else
+    LineNo := LineIndexOf(LinePtr) + 1;
+  FLnPtr   := NextLineStart(LinePtr);
+  FLnNum   := LineNo + 1;
+  FLnValid := True;
+
+  { A line the debugger has marked takes one colour across its whole width,
+    as it did in Turbo Pascal; the selection still wins over both so that
+    you can see what you are about to cut. }
+  MarkAttr := 0;
+  if FileName <> '' then
+  begin
+    if (DebugStopLine = LineNo) and
+       (ExpandFileName(DebugStopFile) = ExpandFileName(FileName)) then
+      MarkAttr := CurrentAttr
+    else if IsBreakpoint(FileName, LineNo) then
+      MarkAttr := BreakpointAttr;
+  end;
 
   if DoHi then
   begin
@@ -518,6 +556,8 @@ begin
     Selected := HasSel and (Pos >= SelStart) and (Pos < SelEnd);
     if Selected then
       A := SelAttr
+    else if MarkAttr <> 0 then
+      A := MarkAttr
     else if DoHi then
       A := BG or TokColour(Toks[k])
     else
@@ -544,7 +584,12 @@ begin
   { Trailing blanks take the selection colour when the line break itself is
     inside the selection, so a multi-line selection reads as one block. }
   Selected := HasSel and (EolPos >= SelStart) and (EolPos < SelEnd);
-  if Selected then A := SelAttr else A := NormAttr;
+  if Selected then
+    A := SelAttr
+  else if MarkAttr <> 0 then
+    A := MarkAttr          { the marker runs to the edge of the window }
+  else
+    A := NormAttr;
   while Col < Width do
   begin
     Cells[Col] := $20 or (Word(A) shl 8);

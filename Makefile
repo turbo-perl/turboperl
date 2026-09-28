@@ -19,7 +19,7 @@ FPCFLAGS  := -Sg -Mobjfpc -O2 -Xs -vw -Fu$(SRCDIR) -Fu$(FVUNITS) -Fi$(SRCDIR) -F
 
 TARGET    := turboperl
 TESTS     := $(TESTDIR)/hltest $(TESTDIR)/texttest $(TESTDIR)/perltest \
-             $(TESTDIR)/cfgtest
+             $(TESTDIR)/cfgtest $(TESTDIR)/dbgtest
 
 SOURCES   := $(wildcard $(SRCDIR)/*.pas) $(SRCDIR)/perlwords.inc turboperl.pas
 
@@ -42,6 +42,7 @@ test: $(TESTS)
 	  d=$$(mktemp -d) && TPTESTHOME=$$d HOME=$$d $(TESTDIR)/cfgtest; \
 	  rc=$$?; rm -rf $$d; exit $$rc
 	@echo; echo "== perl process layer =="; $(TESTDIR)/perltest
+	@echo; echo "== debugger session =="; $(TESTDIR)/dbgtest
 	@echo; echo "== highlighter on the torture file =="; \
 	  $(TESTDIR)/hltest -s $(TESTDIR)/torture.pl | \
 	  awk -F'|' '{gsub(/ /,"",$$2)} END{print "final scanner state: " $$2}'
@@ -60,6 +61,9 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl
 	install -m 644 lib/TurboPerl/Unbuffer.pm \
 	  $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl/Unbuffer.pm
+	install -d $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl/Debug
+	install -m 644 lib/TurboPerl/Debug/Bridge.pm \
+	  $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl/Debug/Bridge.pm
 	install -d $(DESTDIR)$(PREFIX)/share/turboperl/examples
 	install -m 644 examples/* $(DESTDIR)$(PREFIX)/share/turboperl/examples/
 

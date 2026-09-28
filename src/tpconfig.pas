@@ -26,7 +26,7 @@ type
     Unbuffer      : Boolean;        { autoflush the script's handles }
     RunTimeout    : Integer;        { seconds; 0 disables the limit }
     Warnings      : Boolean;        { add -w when running }
-    IncludeDirs   : AnsiString;     { colon separated, added with -I }
+    IncludeDirs   : AnsiString;     { separated like PATH, added with -I }
 
     { --- editor --- }
     TabSize       : Integer;
@@ -298,7 +298,8 @@ begin
   WriteLn(F, 'timeout        = ', Cfg.RunTimeout);
   WriteLn(F, '# warnings passes -w to perl');
   WriteLn(F, 'warnings       = ', BoolStr(Cfg.Warnings));
-  WriteLn(F, '# includedirs is colon separated and passed as -I');
+  WriteLn(F, '# includedirs is passed as -I, separated the way this system');
+  WriteLn(F, '# separates PATH (a ', PathSeparator, ')');
   WriteLn(F, 'includedirs    = ', Cfg.IncludeDirs);
   WriteLn(F);
   WriteLn(F, '# --- editor ---');

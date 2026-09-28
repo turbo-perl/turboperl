@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Deliberately broken: press F9 and the error turns up in the message
 # window at the bottom.  Press Enter on it to land on the offending line.

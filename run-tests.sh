@@ -53,6 +53,19 @@ keys() {
 }
 
 screen() { tmux capture-pane -t "$SESSION" -p; }
+
+# tmux's own names for the function keys do not always reach the IDE as the
+# key that was asked for - its F8 arrives as something else entirely - so
+# the debugger keys are sent as the byte sequences a real xterm would send.
+rawkeys() {
+    tmux send-keys -t "$SESSION" -H "$@"
+    sleep "${DELAY:-1}"
+}
+F7='1b 5b 31 38 7e'
+F8='1b 5b 31 39 7e'
+CTRL_F2='1b 5b 31 32 3b 35 7e'
+CTRL_F8='1b 5b 31 39 3b 35 7e'
+CTRL_F9='1b 5b 32 30 3b 35 7e'
 screen_colour() { tmux capture-pane -t "$SESSION" -p -e; }
 
 # check NAME HAYSTACK NEEDLE
@@ -100,7 +113,7 @@ check_not() {
 
 # ---------------------------------------------------------------- fixtures
 cat > "$TMPDIR_T/good.pl" <<'EOF'
-#!/usr/bin/perl
+#!/usr/bin/env perl
 use strict;
 use warnings;
 my @xs = qw(one two three);
@@ -110,7 +123,7 @@ print "last: $xs[-1]\n";
 EOF
 
 cat > "$TMPDIR_T/bad.pl" <<'EOF'
-#!/usr/bin/perl
+#!/usr/bin/env perl
 use strict;
 use warnings;
 
@@ -137,7 +150,7 @@ echo "== TurboPerl interface tests =="
 # ------------------------------------------------------- 1. it comes up
 start "$TMPDIR_T/good.pl"
 S=$(screen)
-check "menu bar is drawn"        "$S" "File  Edit  Search  Run  Tools  Options  Window  Help"
+check "menu bar is drawn"        "$S" "File  Edit  Search  Run  Debug  Tools  Options  Window  Help"
 check "status line is drawn"     "$S" "F9 Check"
 check "the file is loaded"       "$S" "print \"count: \", scalar(@xs)"
 check "the title shows the file" "$S" "good.pl"
@@ -249,7 +262,7 @@ check "stray input does not dismiss the prompt" "$S" "press Enter to return to t
 
 DELAY=2 keys Enter
 S=$(screen)
-check "Enter returns to the IDE" "$S" "File  Edit  Search  Run"
+check "Enter returns to the IDE" "$S" "File  Edit  Search  Run  Debug"
 
 # Alt-F5 steps back to the terminal, where the output still is.
 DELAY=2 keys M-F5
@@ -258,7 +271,7 @@ check "the user screen brings the output back" "$S" "CONSOLE OUTPUT LINE"
 check "its prompt sits at the bottom"          "$S" "user screen - press Enter to go back"
 DELAY=2 keys Enter
 S=$(screen)
-check "Enter leaves the user screen" "$S" "File  Edit  Search  Run"
+check "Enter leaves the user screen" "$S" "File  Edit  Search  Run  Debug"
 stop
 
 # A second console run must carry on below the first rather than starting
@@ -315,7 +328,55 @@ DELAY=2 keys Enter
 unset FORCETERM
 stop
 
-# ------------------------------------------------------------- 11. quitting
+# ----------------------------------------------------------- 11. the debugger
+cat > "$TMPDIR_T/dbg.pl" <<'EOF'
+use strict;
+use warnings;
+my $total = 0;
+sub add {
+    my ($n) = @_;
+    $total += $n;
+    return $total;
+}
+for my $i (1 .. 3) { add($i) }
+print "total=$total\n";
+EOF
+start "$TMPDIR_T/dbg.pl"
+DELAY=6 rawkeys $F7
+S=$(screen)
+check "the debugger starts and stops before the first statement" "$S" "3:1"
+C=$(screen_colour)
+# black on cyan is the current statement marker
+check "the current statement is marked" "$C" "$(printf '\033[30m\033[46m')"
+
+# down to the '$total += $n' line and set a break point there
+DELAY=0.4 keys Down Down Down
+DELAY=1.5 rawkeys $CTRL_F8
+C=$(screen_colour)
+check "a break point line turns red" "$C" "$(printf '\033[41m')"
+
+DELAY=5 rawkeys $CTRL_F9
+S=$(screen)
+check "continue stops at the break point" "$S" "6:1"
+
+# the debugger panes
+keys M-d
+DELAY=2 keys v
+S=$(screen)
+check "the variables pane lists lexicals" "$S" "\$n = 1"
+check "and the outer lexical too"         "$S" "\$total = 0"
+
+keys M-d
+DELAY=2 keys s
+S=$(screen)
+check "the call stack names the frame" "$S" "main::add(1)"
+
+DELAY=3 rawkeys $CTRL_F2
+S=$(screen)
+check_not "program reset ends the session" "$S" "main::add(1)"
+stop
+
+# ------------------------------------------------------------- 12. quitting
 start "$TMPDIR_T/good.pl"
 DELAY=2 keys M-x
 if tmux has-session -t "$SESSION" 2>/dev/null; then

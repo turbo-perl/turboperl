@@ -15,13 +15,16 @@ uses
   FVConsts, Gadgets, Video,
   {$IFDEF UNIX} BaseUnix, TermIO, {$ENDIF}
   SysUtils, Classes,
-  TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText;
+  TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText, TPDebug;
 
 type
   PTurboPerl = ^TTurboPerl;
   TTurboPerl = object(TApplication)
     OutWin   : POutputWindow;
     MsgWin   : PMsgWindow;
+    WatchWin : PInfoWindow;
+    StackWin : PInfoWindow;
+    VarWin   : PInfoWindow;
     ClipWin  : PPerlEditWindow;
     Clock    : PClockView;
     WinNum   : Integer;
@@ -52,6 +55,21 @@ type
     procedure RunDeparse;
     procedure ShowPerlVersion;
     procedure ShowIncPath;
+
+    { --- debugging --- }
+    function  DebugActive: Boolean;
+    function  StartDebug: Boolean;
+    procedure EnsureDebug;
+    procedure DebugStop;
+    procedure DebugStep(Which: Integer);
+    procedure DebugRunToCursor;
+    procedure DebugToggleBreakpoint;
+    procedure DebugClearBreakpoints;
+    procedure DebugEvaluate;
+    procedure DebugAddWatch;
+    procedure DebugRefresh;
+    procedure DebugShowStop;
+    procedure InfoSelected(V: PInfoView);
 
     { --- documentation --- }
     procedure PerlDocFor(const Topic: AnsiString; Kind: TDocKind);
@@ -364,6 +382,21 @@ begin
   MsgWin := New(PMsgWindow, Init(MsgR, wnNoNumber));
   MsgWin^.Hide;
   InsertWindow(MsgWin);
+
+  { The debugger's panes share the message strip: they are alternatives to
+    one another rather than things you read at the same time, and the
+    editor keeps the rest of the screen. }
+  WatchWin := New(PInfoWindow, Init(MsgR, 'Watches', wnNoNumber));
+  WatchWin^.Hide;
+  InsertWindow(WatchWin);
+
+  StackWin := New(PInfoWindow, Init(MsgR, 'Call stack', wnNoNumber));
+  StackWin^.Hide;
+  InsertWindow(StackWin);
+
+  VarWin := New(PInfoWindow, Init(MsgR, 'Variables', wnNoNumber));
+  VarWin^.Hide;
+  InsertWindow(VarWin);
 end;
 
 function TTurboPerl.NextWindowNumber: Integer;
@@ -445,6 +478,30 @@ begin
     nil))))));
 end;
 
+function MenuDebug: PMenuItem;
+begin
+  Result :=
+    NewItem('Step ~i~nto',               'F7',        kbF7,       cmDbgStepInto,     hcNoContext,
+    NewItem('Step ~o~ver',               'F8',        kbF8,       cmDbgStepOver,     hcNoContext,
+    NewItem('Step o~u~t',                '',          kbNoKey,    cmDbgStepOut,      hcNoContext,
+    NewItem('~R~un to cursor',           'F4',        kbF4,       cmDbgRunTo,        hcNoContext,
+    NewLine(
+    NewItem('~C~ontinue',                'Ctrl-F9',   kbNoKey,    cmRunProgram,      hcNoContext,
+    NewItem('~P~rogram reset',           'Ctrl-F2',   kbCtrlF2,   cmDbgReset,        hcNoContext,
+    NewItem('I~n~terrupt',               '',          kbNoKey,    cmDbgInterrupt,    hcNoContext,
+    NewLine(
+    NewItem('Toggle ~b~reakpoint',       'Ctrl-F8',   kbCtrlF8,   cmDbgToggleBP,     hcNoContext,
+    NewItem('Clear all break~p~oints',   '',          kbNoKey,    cmDbgClearBPs,     hcNoContext,
+    NewLine(
+    NewItem('~E~valuate/modify...',      'Ctrl-F4',   kbCtrlF4,   cmDbgEvaluate,     hcNoContext,
+    NewItem('~A~dd watch...',            'Ctrl-F7',   kbCtrlF7,   cmDbgAddWatch,     hcNoContext,
+    NewLine(
+    NewItem('~W~atches',                 '',          kbNoKey,    cmDbgWatches,      hcNoContext,
+    NewItem('Call ~s~tack',              'Ctrl-F3',   kbCtrlF3,   cmDbgCallStack,    hcNoContext,
+    NewItem('~V~ariables',               '',          kbNoKey,    cmDbgVariables,    hcNoContext,
+    nil))))))))))))))))));
+end;
+
 function MenuTools: PMenuItem;
 begin
   Result :=
@@ -509,11 +566,12 @@ begin
     NewSubMenu('~E~dit', hcNoContext, NewMenu(MenuEdit),
     NewSubMenu('~S~earch', hcNoContext, NewMenu(MenuSearch),
     NewSubMenu('~R~un', hcNoContext, NewMenu(MenuRun),
+    NewSubMenu('~D~ebug', hcNoContext, NewMenu(MenuDebug),
     NewSubMenu('~T~ools', hcNoContext, NewMenu(MenuTools),
     NewSubMenu('~O~ptions', hcNoContext, NewMenu(MenuOptions),
     NewSubMenu('~W~indow', hcNoContext, NewMenu(MenuWindow),
     NewSubMenu('~H~elp', hcNoContext, NewMenu(MenuHelp),
-    nil)))))))))));
+    nil))))))))))));
 end;
 
 procedure TTurboPerl.InitStatusLine;
@@ -674,7 +732,7 @@ begin
   SetLength(Result, 2);
   Existing := GetEnvironmentVariable('PERL5LIB');
   if Existing <> '' then
-    Result[0] := 'PERL5LIB=' + Cfg.LibDir + ':' + Existing
+    Result[0] := 'PERL5LIB=' + Cfg.LibDir + PathSeparator + Existing
   else
     Result[0] := 'PERL5LIB=' + Cfg.LibDir;
 
@@ -698,11 +756,13 @@ begin
 
   if Cfg.Warnings then Append(Result, ['-w']);
 
-  { -I for each configured include directory. }
+  { -I for each configured include directory.  Separated the way the
+    operating system separates PATH, so that a Windows drive letter is not
+    mistaken for a separator. }
   Dirs := Cfg.IncludeDirs;
   while Dirs <> '' do
   begin
-    P := Pos(':', Dirs);
+    P := Pos(PathSeparator, Dirs);
     if P = 0 then
     begin
       Dir  := Dirs;
@@ -1199,6 +1259,244 @@ begin
 end;
 
 { ========================================================================== }
+{  Debugging                                                                 }
+{ ========================================================================== }
+
+function TTurboPerl.DebugActive: Boolean;
+begin
+  Result := (Session <> nil) and (Session.State in [dsStopped, dsRunning]);
+end;
+
+{ Start a session on the window in front, saving it first the way a run
+  does.  The program stops before its first statement, exactly as Turbo
+  Pascal's F7 did from cold. }
+function TTurboPerl.StartDebug: Boolean;
+var
+  Ed     : PPerlEditor;
+  Script : AnsiString;
+begin
+  Result := False;
+  if not PrepareToRun(Ed, Script) then Exit;
+
+  if Session = nil then Session := TDebugSession.Create;
+  if not Session.Start(Script, Cfg.ScriptArgs) then
+  begin
+    Complain(Session.Error);
+    Exit;
+  end;
+
+  if OutWin <> nil then
+  begin
+    OutWin^.View^.Clear;
+    OutWin^.SetCaption('Output: ' + ExtractFileName(Script));
+  end;
+  DebugRefresh;
+  Result := True;
+end;
+
+procedure TTurboPerl.EnsureDebug;
+begin
+  if not DebugActive then StartDebug;
+end;
+
+procedure TTurboPerl.DebugStop;
+begin
+  if Session = nil then Exit;
+  Session.Stop;
+  DebugRefresh;
+  if Desktop <> nil then Desktop^.Redraw;
+end;
+
+{ 0 into, 1 over, 2 out, 3 continue }
+procedure TTurboPerl.DebugStep(Which: Integer);
+begin
+  if not DebugActive then
+  begin
+    if not StartDebug then Exit;
+    { Starting already stops before the first statement, so F7 from cold
+      has done its job; only continue actually needs to move. }
+    if Which <> 3 then Exit;
+  end;
+  if Session.State <> dsStopped then Exit;
+
+  case Which of
+    0: Session.StepInto;
+    1: Session.StepOver;
+    2: Session.StepOut;
+  else
+    Session.Go;
+  end;
+end;
+
+procedure TTurboPerl.DebugRunToCursor;
+var
+  Ed: PPerlEditor;
+begin
+  Ed := CurrentEditor;
+  if Ed = nil then Exit;
+  if not DebugActive then
+    if not StartDebug then Exit;
+  if Session.State <> dsStopped then Exit;
+  Session.RunTo(Ed^.FileName, Ed^.CurrentLineNo);
+end;
+
+procedure TTurboPerl.DebugToggleBreakpoint;
+var
+  Ed: PPerlEditor;
+begin
+  Ed := CurrentEditor;
+  if Ed = nil then Exit;
+  if Ed^.FileName = '' then
+  begin
+    Complain('Save the file before setting a break point in it.');
+    Exit;
+  end;
+  ToggleBreakpoint(Ed^.FileName, Ed^.CurrentLineNo);
+  Ed^.DrawView;
+end;
+
+procedure TTurboPerl.DebugClearBreakpoints;
+var
+  F: AnsiString;
+  L, i: Integer;
+begin
+  for i := BreakpointCount - 1 downto 0 do
+  begin
+    BreakpointAt(i, F, L);
+    if F <> '' then ToggleBreakpoint(F, L);
+  end;
+  if Desktop <> nil then Desktop^.Redraw;
+end;
+
+procedure TTurboPerl.DebugEvaluate;
+var
+  Ed    : PPerlEditor;
+  Expr  : AnsiString;
+  Value : AnsiString;
+begin
+  if (Session = nil) or (Session.State <> dsStopped) then
+  begin
+    Complain('Nothing is stopped; start the debugger first.');
+    Exit;
+  end;
+  Ed := CurrentEditor;
+  Expr := '';
+  if Ed <> nil then Expr := Ed^.WordAtCursor;
+  if not ExecEvaluateDialog(Expr, Value) then Exit;
+  if Trim(Expr) = '' then Exit;
+  Value := Session.Evaluate(Expr);
+  ExecEvaluateResult(Expr, Value);
+end;
+
+procedure TTurboPerl.DebugAddWatch;
+var
+  Ed   : PPerlEditor;
+  Expr : AnsiString;
+begin
+  if Session = nil then Session := TDebugSession.Create;
+  Ed := CurrentEditor;
+  Expr := '';
+  if Ed <> nil then Expr := Ed^.WordAtCursor;
+  if not ExecAddWatchDialog(Expr) then Exit;
+  if Trim(Expr) = '' then Exit;
+  Session.Watches.Add(Expr);
+  Session.SendWatches;
+  if WatchWin <> nil then
+  begin
+    WatchWin^.Show;
+    WatchWin^.Select;
+  end;
+  DebugRefresh;
+end;
+
+{ Put everything the session knows back on the screen. }
+procedure TTurboPerl.DebugRefresh;
+var
+  i     : Integer;
+  Frame : TStackFrame;
+  Text  : AnsiString;
+  Live  : Boolean;
+begin
+  Live := (Session <> nil) and (Session.State = dsStopped);
+
+  if WatchWin <> nil then
+  begin
+    WatchWin^.View^.Clear;
+    if Session <> nil then
+      for i := 0 to Session.Watches.Count - 1 do
+      begin
+        Text := Session.Watches[i];
+        if Live and (i < Session.WatchVals.Count) then
+          Text := Text + ' = ' + Session.WatchVals[i]
+        else
+          Text := Text + ' = <not stopped>';
+        WatchWin^.View^.Add(Text);
+      end;
+    WatchWin^.View^.Refreshed;
+  end;
+
+  if StackWin <> nil then
+  begin
+    StackWin^.View^.Clear;
+    if Live then
+      for i := 0 to Session.StackCount - 1 do
+      begin
+        Frame := Session.StackFrame(i);
+        Text  := Format('%s(%s)  %s:%d', [Frame.Subroutine, Frame.Args,
+                        ExtractFileName(Frame.FileName), Frame.Line]);
+        StackWin^.View^.Add(Text,
+          Frame.FileName + '|' + IntToStr(Frame.Line));
+      end;
+    StackWin^.View^.Refreshed;
+  end;
+
+  if VarWin <> nil then
+  begin
+    VarWin^.View^.Clear;
+    if Live then
+      for i := 0 to Session.Pad.Count - 1 do
+        VarWin^.View^.Add(Session.Pad.Names[i] + ' = ' +
+                          Session.Pad.ValueFromIndex[i]);
+    VarWin^.View^.Refreshed;
+  end;
+end;
+
+{ Bring the source of the stop into view with the cursor on it. }
+procedure TTurboPerl.DebugShowStop;
+var
+  W: PPerlEditWindow;
+begin
+  if (Session = nil) or (Session.State <> dsStopped) then Exit;
+  if Session.CurFile = '' then Exit;
+  if not FileExists(Session.CurFile) then Exit;
+
+  W := WindowFor(Session.CurFile);
+  if W = nil then W := OpenNamed(Session.CurFile);
+  if W = nil then Exit;
+
+  W^.Show;
+  W^.Select;
+  W^.Editor^.GotoLine(Session.CurLine);
+end;
+
+procedure TTurboPerl.InfoSelected(V: PInfoView);
+var
+  F: AnsiString;
+  L: Integer;
+  W: PPerlEditWindow;
+begin
+  if V = nil then Exit;
+  if not V^.CurrentTarget(F, L) then Exit;
+  if not FileExists(F) then Exit;
+  W := WindowFor(F);
+  if W = nil then W := OpenNamed(F);
+  if W = nil then Exit;
+  W^.Show;
+  W^.Select;
+  W^.Editor^.GotoLine(L);
+end;
+
+{ ========================================================================== }
 {  Documentation                                                             }
 { ========================================================================== }
 
@@ -1399,7 +1697,10 @@ begin
     cmOpen         : OpenFile;
     cmSaveAll      : SaveAll;
 
-    cmRunProgram   : RunScript(Cfg.RunMode = rmConsole);
+    { Turbo Pascal's Run key does double duty: with a program stopped in
+      the debugger it carries on from there, otherwise it runs normally. }
+    cmRunProgram   : if DebugActive then DebugStep(3)
+                     else RunScript(Cfg.RunMode = rmConsole);
     cmRunConsole   : RunScript(True);
     cmSyntaxCheck  : SyntaxCheck;
     cmRunArgs      : ExecRunArgsDialog;
@@ -1414,6 +1715,21 @@ begin
     cmPerlDocDlg   : PerlDocAsk;
 
     cmGotoError    : GotoCurrentError;
+    cmInfoSelect   : InfoSelected(PInfoView(Event.InfoPtr));
+
+    cmDbgStepInto  : DebugStep(0);
+    cmDbgStepOver  : DebugStep(1);
+    cmDbgStepOut   : DebugStep(2);
+    cmDbgRunTo     : DebugRunToCursor;
+    cmDbgReset     : DebugStop;
+    cmDbgInterrupt : if Session <> nil then Session.Interrupt;
+    cmDbgToggleBP  : DebugToggleBreakpoint;
+    cmDbgClearBPs  : DebugClearBreakpoints;
+    cmDbgEvaluate  : DebugEvaluate;
+    cmDbgAddWatch  : DebugAddWatch;
+    cmDbgWatches   : if WatchWin <> nil then begin WatchWin^.Show; WatchWin^.Select; end;
+    cmDbgCallStack : if StackWin <> nil then begin StackWin^.Show; StackWin^.Select; end;
+    cmDbgVariables : if VarWin   <> nil then begin VarWin^.Show;   VarWin^.Select;   end;
     cmNextError    : StepError(1);
     cmPrevError    : StepError(-1);
 
@@ -1481,11 +1797,50 @@ end;
 
 procedure TTurboPerl.Idle;
 var
-  HasEd : Boolean;
-  HasMsg: Boolean;
+  HasEd   : Boolean;
+  HasMsg  : Boolean;
+  Dbg     : Boolean;
+  Stopped : Boolean;
+  Text    : AnsiString;
+  WasState: TDebugState;
 begin
   inherited Idle;
   if Clock <> nil then Clock^.Update;
+
+  { The debugger runs alongside the interface rather than blocking it, so
+    this is where a stop, a line of output or the program ending is picked
+    up.  Poll says whether anything actually changed. }
+  if Session <> nil then
+  begin
+    WasState := Session.State;
+    if Session.Poll then
+    begin
+      Text := Session.TakeOutput;
+      if (Text <> '') and (OutWin <> nil) then
+      begin
+        OutWin^.View^.AddText(Text);
+        OutWin^.Show;
+      end;
+
+      DebugRefresh;
+
+      if Session.State = dsStopped then
+        DebugShowStop
+      else if (Session.State = dsFinished) and (WasState <> dsFinished) then
+      begin
+        if Desktop <> nil then Desktop^.Redraw;
+        MessageBox('The program has finished.', nil,
+                   mfInformation or mfOKButton);
+      end;
+
+      if Session.Error <> '' then
+      begin
+        Complain(Session.Error);
+        Session.Stop;
+        DebugRefresh;
+      end;
+    end;
+  end;
 
   HasEd  := CurrentEditor <> nil;
   HasMsg := (MsgWin <> nil) and (MsgWin^.View^.Items.Count > 0);
@@ -1505,6 +1860,35 @@ begin
     EnableCommands([cmNextError, cmPrevError, cmGotoError])
   else
     DisableCommands([cmNextError, cmPrevError, cmGotoError]);
+
+  Dbg     := DebugActive;
+  Stopped := (Session <> nil) and (Session.State = dsStopped);
+
+  { Stepping needs a stopped program; starting one only needs a source. }
+  if Stopped then
+    EnableCommands([cmDbgStepInto, cmDbgStepOver, cmDbgStepOut, cmDbgRunTo,
+                    cmDbgEvaluate])
+  else
+  begin
+    DisableCommands([cmDbgStepOut, cmDbgEvaluate]);
+    if HasEd then
+      EnableCommands([cmDbgStepInto, cmDbgStepOver, cmDbgRunTo])
+    else
+      DisableCommands([cmDbgStepInto, cmDbgStepOver, cmDbgRunTo]);
+  end;
+
+  if Dbg then EnableCommands([cmDbgReset]) else DisableCommands([cmDbgReset]);
+  if (Session <> nil) and (Session.State = dsRunning) then
+    EnableCommands([cmDbgInterrupt])
+  else
+    DisableCommands([cmDbgInterrupt]);
+
+  if HasEd then EnableCommands([cmDbgToggleBP]) else DisableCommands([cmDbgToggleBP]);
+  if BreakpointCount > 0 then
+    EnableCommands([cmDbgClearBPs])
+  else
+    DisableCommands([cmDbgClearBPs]);
+  EnableCommands([cmDbgAddWatch, cmInfoSelect]);
 
   if (OutWin <> nil) and (OutWin^.View^.Lines.Count > 0) then
     EnableCommands([cmSaveOutput, cmClearOutput])

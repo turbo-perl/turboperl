@@ -4,6 +4,7 @@
 
 # Compiled test programs; their sources are tracked
 /tests/cfgtest
+/tests/dbgtest
 /tests/hltest
 /tests/perltest
 /tests/texttest

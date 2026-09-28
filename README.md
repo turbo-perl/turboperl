@@ -36,6 +36,9 @@ of a 1992 Borland IDE pointed at a modern perl.
   terminal afterwards, so a console run's output can be read again.
 - **Syntax check** (F9) with `perl -c`. Errors land in a message list;
   Enter on one opens the file and puts the cursor on the line.
+- **An integrated debugger** in the Turbo Pascal mould: breakpoints, step
+  into/over/out, run to cursor, watches, a call stack and evaluate — with
+  the current statement highlighted in the editor.
 - **perldoc** for the word under the cursor (Ctrl-F1), or by name.
 - **perltidy** and **perlcritic** if they are installed, plus `perl -MO=Deparse`.
 - The usual editor: multiple windows, find and replace, undo, clipboard,
@@ -89,6 +92,19 @@ turboperl --help
 | `F10` | menu |
 | `Alt-X` | exit |
 
+Debugger:
+
+| Key | |
+|---|---|
+| `F7` / `F8` | step into / step over |
+| `F4` | run to cursor |
+| `Ctrl-F9` | continue (the same key that runs, when something is stopped) |
+| `Ctrl-F8` | toggle breakpoint |
+| `Ctrl-F2` | program reset |
+| `Ctrl-F4` | evaluate / modify |
+| `Ctrl-F7` | add watch |
+| `Ctrl-F3` | call stack |
+
 Select with Shift and the cursor keys, or mark a block the WordStar way with
 `Ctrl-K B`. Find, replace and go to line are on the Search menu with their
 usual `Ctrl-Q` prefixes.
@@ -114,6 +130,36 @@ instead: it collects stdout and stderr into the Output window, where they
 stay until cleared. Setting `TURBOPERL_DEBUG` to a file name makes the IDE
 write the terminal type and the screen-switch sequences it detected there,
 which is the first thing to check when a console run misbehaves.
+
+## The debugger
+
+`F7` or `F8` on a saved file starts a session and stops before the first
+statement, the way Turbo Pascal did from cold. From there the keys above
+behave as you would expect; `Ctrl-F9` does double duty, continuing when
+something is stopped and running normally otherwise.
+
+The current statement is shown black on cyan across the whole line, and
+breakpoint lines white on red. A breakpoint set on a line Perl cannot stop
+on — a blank line, a comment, the middle of a statement — moves to the next
+line that it can, and the marker moves with it, so what you see is where the
+program will actually stop.
+
+Watches, Variables and Call Stack share the strip at the bottom of the
+screen. Variables lists the lexicals in scope at the stop, watches are
+re-evaluated every time the program stops, and Enter on a call stack frame
+opens that file at that line. Everything the program prints goes to the
+Output window as it happens, so you can watch it accumulate while stepping.
+
+It is built on [Devel::ebug](https://metacpan.org/pod/Devel::ebug), driven
+through a small bridge (`lib/TurboPerl/Debug/Bridge.pm`) that the IDE talks
+to over a line of JSON at a time. The bridge exists for two reasons: the IDE
+is not Perl, and every stop needs the location, stack, variables, watches
+and new output together — six round trips gathered into one message.
+
+Two things to know. The program's output is captured rather than given the
+terminal, so a script that prompts for keyboard input cannot be stepped
+through; run it normally for that. And `perl -d` is several times slower
+than an ordinary run.
 
 ## Settings
 
@@ -162,7 +208,9 @@ perl saw an untouched environment.
 | `src/tpperl.pas` | running perl, capturing output, parsing its diagnostics |
 | `src/tpconfig.pas` | `~/.turboperlrc` |
 | `src/tpedit.pas` | the editor view and its window |
-| `src/tpviews.pas` | the output and message windows |
+| `src/tpviews.pas` | the output, message and debugger windows |
+| `src/tpdebug.pas` | the debug session: talks to the bridge, holds breakpoints |
+| `lib/TurboPerl/Debug/Bridge.pm` | the Perl half, driving Devel::ebug |
 | `src/tpdlgs.pas` | settings dialogs |
 | `src/tpapp.pas` | menus, status line, and everything wired together |
 
@@ -182,6 +230,9 @@ make test
   containing a `#`.
 - `tests/perltest` — running a child, feeding it stdin, timing out a runaway
   one, bulk output, a missing interpreter, and the diagnostic parser.
+- `tests/dbgtest` — a whole debug session with no user interface: break,
+  run, inspect lexicals, evaluate in the stopped frame, step out, collect
+  output, run to the end.
 - `tests/hltest` — a headless highlighter you can point at any file:
   `tests/hltest -m f.pl` prints a token map under each line, `-s` prints the
   scanner state after it, and with no flag it prints the file in colour.
