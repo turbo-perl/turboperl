@@ -376,6 +376,37 @@ S=$(screen)
 check_not "program reset ends the session" "$S" "main::add(1)"
 stop
 
+# a long value is cut to fit, and opens out a level at a time
+cat > "$TMPDIR_T/deep.pl" <<'EOF'
+use strict;
+use warnings;
+my $deep = { list => [1 .. 40], name => 'x' x 200 };
+print "ok\n";
+EOF
+start "$TMPDIR_T/deep.pl"
+DELAY=6 rawkeys $F7
+DELAY=0.4 keys Down
+DELAY=1.5 rawkeys $CTRL_F8
+DELAY=5 rawkeys $CTRL_F9
+keys M-d
+DELAY=2 keys v
+S=$(screen)
+check_re "a long variable is cut to one line" "$S" '\+ \$deep = \{list => \[1, 2, .*\.\.\.'
+keys Right
+S=$(screen)
+check "Right opens it"                   "$S" "- \$deep"
+check "showing its elements, still shut" "$S" "+ {list} = [1, 2, 3"
+check "and its plain values"             "$S" "{name} = 'xxx"
+keys Right Right
+S=$(screen)
+check "an element opens in turn"         "$S" "    [0] = 1"
+keys Left Left Left
+S=$(screen)
+check "Left goes back up and closes"     "$S" "+ \$deep = {list"
+check_not "leaving the elements hidden"  "$S" "{name}"
+DELAY=3 rawkeys $CTRL_F2
+stop
+
 # ------------------------------------------------------------- 12. quitting
 start "$TMPDIR_T/good.pl"
 DELAY=2 keys M-x

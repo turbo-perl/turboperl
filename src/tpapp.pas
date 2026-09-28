@@ -439,7 +439,7 @@ begin
   StackWin^.Hide;
   InsertWindow(StackWin);
 
-  VarWin := New(PInfoWindow, Init(MsgR, 'Variables', wnNoNumber));
+  VarWin := New(PVarWindow, Init(MsgR, 'Variables', wnNoNumber));
   VarWin^.Hide;
   InsertWindow(VarWin);
 end;
@@ -1499,12 +1499,10 @@ begin
 
   if VarWin <> nil then
   begin
-    VarWin^.View^.Clear;
     if Live then
-      for i := 0 to Session.Pad.Count - 1 do
-        VarWin^.View^.Add(Session.Pad.Names[i] + ' = ' +
-                          Session.Pad.ValueFromIndex[i]);
-    VarWin^.View^.Refreshed;
+      PVarView(VarWin^.View)^.SetVars(Session.Vars)
+    else
+      PVarView(VarWin^.View)^.SetVars(nil);
   end;
 end;
 

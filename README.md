@@ -145,7 +145,10 @@ line that it can, and the marker moves with it, so what you see is where the
 program will actually stop.
 
 Watches, Variables and Call Stack share the strip at the bottom of the
-screen. Variables lists the lexicals in scope at the stop, watches are
+screen. Variables lists the lexicals in scope at the stop, one line each
+and cut short to fit; Right (or `+`, or Enter) opens an array, hash or
+reference out a level to show its elements, Left (or `-`) closes it again,
+and whatever is open stays open as you step. Watches are
 re-evaluated every time the program stops, and Enter on a call stack frame
 opens that file at that line. Everything the program prints goes to the
 Output window as it happens, so you can watch it accumulate while stepping.

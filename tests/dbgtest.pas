@@ -113,6 +113,24 @@ begin
         S.Pad.Values['$point'] = '{x => 1, y => [2, 3]}', S.Pad.Values['$point']);
   Check('an object shows its class', S.Pad.Values['$pet'] = 'Dog {name => ''Rex''}',
         S.Pad.Values['$pet']);
+  { The same variables as a tree to open out: $point, then its elements. }
+  i := 0;
+  while (i < Length(S.Vars)) and (S.Vars[i].Name <> '$point') do Inc(i);
+  Check('the tree has $point', i < Length(S.Vars));
+  if i + 4 < Length(S.Vars) then
+  begin
+    Check('$point can be opened', S.Vars[i].HasKids and (S.Vars[i].Depth = 0));
+    Check('its first element follows it',
+          (S.Vars[i+1].Name = '{x}') and (S.Vars[i+1].Depth = 1) and
+          (S.Vars[i+1].Value = '1') and not S.Vars[i+1].HasKids,
+          S.Vars[i+1].Name + ' = ' + S.Vars[i+1].Value);
+    Check('an element can be opened in turn',
+          (S.Vars[i+2].Name = '{y}') and S.Vars[i+2].HasKids and
+          (S.Vars[i+3].Name = '[0]') and (S.Vars[i+3].Depth = 2),
+          S.Vars[i+2].Name + ' ' + S.Vars[i+3].Name);
+    Check('paths name the node', S.Vars[i+3].Path = #1'$point'#1'{y}'#1'[0]');
+  end;
+
   S.Watches.Add('@primes');
   S.Watches.Add('scalar @primes');
   S.SendWatches;
