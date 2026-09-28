@@ -33,6 +33,13 @@ function ExecEditorOptionsDialog: Boolean;
 { Asks what to look up.  Topic comes in as the default. }
 function ExecPerlDocDialog(var Topic: AnsiString; var Kind: TDocKind): Boolean;
 
+{ Ask for an expression to evaluate, then show what came back. }
+function ExecEvaluateDialog(var Expr: AnsiString; var Value: AnsiString): Boolean;
+procedure ExecEvaluateResult(const Expr, Value: AnsiString);
+
+{ Ask for an expression to watch. }
+function ExecAddWatchDialog(var Expr: AnsiString): Boolean;
+
 procedure ShowAbout;
 
 implementation
@@ -165,7 +172,7 @@ begin
   AddInput(D, R, '~P~erl interpreter', 128, 0);
 
   R.Assign(3, 6, 58, 7);
-  AddInput(D, R, '~I~nclude directories (colon separated, passed as -I)',
+  AddInput(D, R, '~I~nclude directories (separated like PATH, passed as -I)',
            128, hiIncDirs);
 
   R.Assign(3, 9, 13, 10);
@@ -338,6 +345,64 @@ begin
 end;
 
 { ========================================================================== }
+
+{ ========================================================================== }
+{  Debugger dialogs                                                          }
+{ ========================================================================== }
+
+type
+  TExprRec = packed record
+    Expr: String[128];
+  end;
+
+const
+  hiEval  = 14;
+  hiWatch = 15;
+
+function AskExpression(const Title, Prompt, Note: String; HistId: Word;
+                       var Expr: AnsiString): Boolean;
+var
+  D  : PDialog;
+  R  : Objects.TRect;
+  Rec: TExprRec;
+begin
+  R.Assign(0, 0, 60, 12);
+  D := New(PDialog, Init(R, Title));
+  D^.Options := D^.Options or ofCentered;
+
+  R.Assign(3, 3, 52, 4);
+  AddInput(D, R, Prompt, 128, HistId);
+
+  R.Assign(3, 6, 56, 8);
+  D^.Insert(New(PStaticText, Init(R, Note)));
+
+  AddButtons(D, 9);
+  D^.SelectNext(False);
+
+  Rec.Expr := Copy(Expr, 1, 128);
+  Result := Application^.ExecuteDialog(D, @Rec) <> cmCancel;
+  if Result then Expr := Trim(Rec.Expr);
+end;
+
+function ExecEvaluateDialog(var Expr: AnsiString; var Value: AnsiString): Boolean;
+begin
+  Value := '';
+  Result := AskExpression('Evaluate', '~E~xpression',
+    'Evaluated in the scope the program is stopped in,' + #13 +
+    'so lexical variables are in reach.', hiEval, Expr);
+end;
+
+procedure ExecEvaluateResult(const Expr, Value: AnsiString);
+begin
+  MessageBox(Copy(Expr, 1, 60) + #13 + #13 + Copy(Value, 1, 300),
+             nil, mfInformation or mfOKButton);
+end;
+
+function ExecAddWatchDialog(var Expr: AnsiString): Boolean;
+begin
+  Result := AskExpression('Add Watch', '~E~xpression to watch',
+    'Re-evaluated every time the program stops.', hiWatch, Expr);
+end;
 
 procedure ShowAbout;
 begin

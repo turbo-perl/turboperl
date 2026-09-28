@@ -43,6 +43,17 @@ const
   cmRunArgs       = 115;
   cmGotoError     = 116;   { jump to the selected message              }
   cmStripTrailing = 117;
+  cmDbgStepInto   = 118;   { F7  - trace into        }
+  cmDbgStepOver   = 119;   { F8  - step over         }
+  cmDbgStepOut    = 120;
+  cmDbgRunTo      = 121;   { F4  - run to cursor     }
+  cmDbgToggleBP   = 122;   { Ctrl-F8                 }
+  cmDbgReset      = 123;   { Ctrl-F2 - program reset }
+  cmDbgInterrupt  = 124;
+  cmDbgEvaluate   = 125;   { Ctrl-F4                 }
+  cmDbgAddWatch   = 126;   { Ctrl-F7                 }
+  cmDbgClearBPs   = 127;
+  cmInfoSelect    = 128;   { Enter on a watch / stack row }
 
   { --- always enabled --- }
   cmAboutBox      = 1000;
@@ -58,6 +69,9 @@ const
   cmPerlVersion   = 1010;
   cmPerlIncPath   = 1011;
   cmToggleCapture = 1012;
+  cmDbgCallStack  = 1013;  { Ctrl-F3 }
+  cmDbgWatches    = 1014;
+  cmDbgVariables  = 1015;
 
 { -------------------------------------------------------------------------- }
 {  Syntax colour slots.                                                       }
@@ -117,6 +131,12 @@ const
     { Operator } $7,
     { Data     } $8,   { dark grey   }
     { Heredoc  } $A);
+
+  { --- debugger line markers ---
+    Whole-line attributes, foreground and background together, because a
+    marked line gives up its syntax colouring the way Turbo Pascal's did. }
+  BreakpointAttr = $4F;   { white on red   }
+  CurrentAttr    = $30;   { black on cyan  }
 
   { A second, quieter scheme. }
   MonoScheme : array[TPerlTok] of Byte = (

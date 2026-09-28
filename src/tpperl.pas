@@ -101,8 +101,9 @@ begin
   Result := '';
   if Name = '' then Exit;
 
-  { An explicit path is taken as given. }
-  if Pos('/', Name) > 0 then
+  { An explicit path is taken as given.  Windows accepts a forward slash as
+    well as its own separator, so look for either. }
+  if (Pos('/', Name) > 0) or (Pos(PathDelim, Name) > 0) then
   begin
     if FileExists(Name) then Result := Name;
     Exit;
@@ -111,7 +112,10 @@ begin
   Path := GetEnvironmentVariable('PATH');
   while Path <> '' do
   begin
-    P := Pos(':', Path);
+    { PathSeparator is what the operating system puts between entries in a
+      list of directories: a colon here, a semicolon on Windows, where a
+      colon would split C:\... down the middle instead. }
+    P := Pos(PathSeparator, Path);
     if P = 0 then
     begin
       Dir  := Path;

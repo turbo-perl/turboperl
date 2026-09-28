@@ -75,6 +75,37 @@ type
     function    StepLocated(Dir: Integer): Boolean;
   end;
 
+  { ---------------------------------------------------------------------- }
+  {  A plain list of lines, used for the debugger's watches, call stack and }
+  {  variables.  Rows may carry a source location, in which case Enter on   }
+  {  one goes there - the same gesture as the message list.                 }
+  { ---------------------------------------------------------------------- }
+
+  PInfoView = ^TInfoView;
+  TInfoView = object(TListViewer)
+    Items   : TStringList;   { what is shown }
+    Targets : TStringList;   { 'file|line' per row, empty when not jumpable }
+    constructor Init(var Bounds: Objects.TRect; AHScrollBar, AVScrollBar: PScrollBar);
+    destructor  Done; virtual;
+    function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
+    procedure   SelectItem(Item: Sw_Integer); virtual;
+    procedure   HandleEvent(var Event: TEvent); virtual;
+    procedure   Clear;
+    procedure   Add(const Text: AnsiString; const Target: AnsiString = '');
+    procedure   Refreshed;
+    function    CurrentTarget(out AFile: AnsiString; out ALine: Integer): Boolean;
+  end;
+
+  PInfoWindow = ^TInfoWindow;
+  TInfoWindow = object(TWindow)
+    View    : PInfoView;
+    Caption : String[64];
+    constructor Init(var Bounds: Objects.TRect; const ATitle: String; ANumber: Integer);
+    function    GetTitle(MaxSize: Sw_Integer): TTitleStr; virtual;
+    procedure   Close; virtual;
+    procedure   SetCaption(const S: String);
+  end;
+
   PMsgWindow = ^TMsgWindow;
   TMsgWindow = object(TWindow)
     View    : PMsgView;
@@ -348,6 +379,136 @@ begin
     Exit;
   end;
   inherited HandleEvent(Event);
+end;
+
+{ ========================================================================== }
+{  TInfoView / TInfoWindow                                                   }
+{ ========================================================================== }
+
+constructor TInfoView.Init(var Bounds: Objects.TRect;
+                           AHScrollBar, AVScrollBar: PScrollBar);
+begin
+  inherited Init(Bounds, 1, AHScrollBar, AVScrollBar);
+  Items   := TStringList.Create;
+  Targets := TStringList.Create;
+  GrowMode := gfGrowHiX + gfGrowHiY;
+  SetRange(0);
+end;
+
+destructor TInfoView.Done;
+begin
+  Items.Free;
+  Targets.Free;
+  inherited Done;
+end;
+
+procedure TInfoView.Clear;
+begin
+  Items.Clear;
+  Targets.Clear;
+end;
+
+procedure TInfoView.Add(const Text: AnsiString; const Target: AnsiString);
+begin
+  Items.Add(Text);
+  Targets.Add(Target);
+end;
+
+{ Call once after a run of Add, to resize and repaint. }
+procedure TInfoView.Refreshed;
+begin
+  SetRange(Items.Count);
+  if Focused >= Items.Count then FocusItem(0);
+  DrawView;
+end;
+
+function TInfoView.GetText(Item, MaxLen: Sw_Integer): String;
+var
+  S: AnsiString;
+begin
+  Result := '';
+  if (Item < 0) or (Item >= Items.Count) then Exit;
+  S := Items[Item];
+  if Length(S) > MaxLen then SetLength(S, MaxLen);
+  if Length(S) > 255 then SetLength(S, 255);
+  Result := S;
+end;
+
+function TInfoView.CurrentTarget(out AFile: AnsiString; out ALine: Integer): Boolean;
+var
+  S: AnsiString;
+  P: Integer;
+begin
+  AFile := '';
+  ALine := 0;
+  Result := False;
+  if (Focused < 0) or (Focused >= Targets.Count) then Exit;
+  S := Targets[Focused];
+  if S = '' then Exit;
+  P := LastDelimiter('|', S);
+  if P = 0 then Exit;
+  AFile := Copy(S, 1, P - 1);
+  ALine := StrToIntDef(Copy(S, P + 1, Length(S)), 0);
+  Result := (AFile <> '') and (ALine > 0);
+end;
+
+procedure TInfoView.SelectItem(Item: Sw_Integer);
+begin
+  if (Item >= 0) and (Item < Items.Count) then
+    Message(Application, evCommand, cmInfoSelect, @Self);
+end;
+
+procedure TInfoView.HandleEvent(var Event: TEvent);
+begin
+  if (Event.What = evKeyDown) and (Event.KeyCode = kbEnter) and
+     (Items.Count > 0) then
+  begin
+    SelectItem(Focused);
+    ClearEvent(Event);
+    Exit;
+  end;
+  inherited HandleEvent(Event);
+end;
+
+constructor TInfoWindow.Init(var Bounds: Objects.TRect; const ATitle: String;
+                             ANumber: Integer);
+var
+  R: Objects.TRect;
+  HS, VS: PScrollBar;
+begin
+  inherited Init(Bounds, ATitle, ANumber);
+  Caption := ATitle;
+  Options := Options or ofTileable;
+
+  R.Assign(18, Size.Y - 1, Size.X - 2, Size.Y);
+  HS := New(PScrollBar, Init(R));
+  Insert(HS);
+
+  R.Assign(Size.X - 1, 1, Size.X, Size.Y - 1);
+  VS := New(PScrollBar, Init(R));
+  Insert(VS);
+
+  GetExtent(R);
+  R.Grow(-1, -1);
+  View := New(PInfoView, Init(R, HS, VS));
+  Insert(View);
+end;
+
+function TInfoWindow.GetTitle(MaxSize: Sw_Integer): TTitleStr;
+begin
+  Result := Caption;
+  if Length(Result) > MaxSize then SetLength(Result, MaxSize);
+end;
+
+procedure TInfoWindow.SetCaption(const S: String);
+begin
+  Caption := S;
+  if Frame <> nil then Frame^.DrawView;
+end;
+
+procedure TInfoWindow.Close;
+begin
+  Hide;
 end;
 
 { ========================================================================== }
