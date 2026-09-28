@@ -93,6 +93,42 @@ begin
 
   S.Free;
 
+  { Data structures show their contents, not ARRAY(0x...). }
+  Script := ExpandFileName('examples/datademo.pl');
+  ToggleBreakpoint(Script, 10);
+  S := TDebugSession.Create;
+  if not S.Start(Script, '') then
+  begin
+    WriteLn('FAIL could not start: ', S.Error);
+    Halt(1);
+  end;
+  S.Go;
+  Check('run reached the print', Settle(S, 20000) and (S.CurLine = 10),
+        'line ' + IntToStr(S.CurLine));
+  Check('an array shows its elements', S.Pad.Values['@primes'] = '(2, 3, 5, 7)',
+        S.Pad.Values['@primes']);
+  Check('a hash shows its pairs', S.Pad.Values['%ages'] = '(alice => 31, bob => 27)',
+        S.Pad.Values['%ages']);
+  Check('a reference shows what it refers to',
+        S.Pad.Values['$point'] = '{x => 1, y => [2, 3]}', S.Pad.Values['$point']);
+  Check('an object shows its class', S.Pad.Values['$pet'] = 'Dog {name => ''Rex''}',
+        S.Pad.Values['$pet']);
+  S.Watches.Add('@primes');
+  S.Watches.Add('scalar @primes');
+  S.SendWatches;
+  Settle(S, 5000);
+  for i := 1 to 50 do
+  begin
+    S.Poll;
+    if S.WatchVals.Count = 2 then Break;
+    Sleep(20);
+  end;
+  Check('a watch on an array shows its elements',
+        (S.WatchVals.Count = 2) and (S.WatchVals[0] = '(2, 3, 5, 7)'), S.WatchVals.Text);
+  Check('a watch can still ask for the count',
+        (S.WatchVals.Count = 2) and (S.WatchVals[1] = '4'), S.WatchVals.Text);
+  S.Free;
+
   WriteLn;
   if Fails = 0 then WriteLn('all debugger tests passed')
   else begin WriteLn(Fails, ' FAILURES'); Halt(1); end;
