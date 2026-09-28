@@ -24,6 +24,7 @@ use strict;
 use warnings;
 
 use Devel::ebug;
+use Scalar::Util qw( blessed reftype refaddr looks_like_number );
 
 our $VERSION = '1.0';
 
@@ -76,12 +77,163 @@ sub fail {
 # put in a list box, and must survive being turned into JSON.
 sub display {
   my($value, $limit) = @_;
+  return trim(summarise($value), $limit);
+}
+
+sub trim {
+  my($text, $limit) = @_;
   $limit ||= 200;
-  return 'undef' unless defined $value;
-  my $text = "$value";
+  $text = "$text";    # a string in the JSON, even when it looks like a number
   $text =~ s/[\r\n\t]/ /g;
   $text = substr($text, 0, $limit - 3) . '...' if length($text) > $limit;
   return $text;
+}
+
+# A one-line picture of a value, written the way Perl would write it:
+# [1, 2, 3] rather than ARRAY(0x55d0c3a8).  Devel::ebug hands back copies
+# of the program's data, not the data itself, so this is free to walk them.
+# Deep or long structures are cut short; display() trims the rest.
+use constant {
+  SUMMARY_DEPTH => 3,     # levels of nesting shown before "..."
+  SUMMARY_ITEMS => 20,    # elements of one array or hash shown
+};
+
+sub summarise {
+  my($value, $depth, $seen) = @_;
+  $depth ||= 0;
+  $seen  ||= {};
+
+  return 'undef' unless defined $value;
+  return $depth ? _quote($value) : "$value" unless ref $value;
+
+  my $class = blessed $value;
+  my $type  = reftype $value;
+  my $addr  = refaddr $value;
+
+  # Something already on the way down: a structure that contains itself.
+  return '...' if $seen->{$addr};
+  local $seen->{$addr} = 1;
+
+  my $inner;
+  if ($type eq 'ARRAY') {
+    $inner = $depth >= SUMMARY_DEPTH && @$value ? '[...]'
+           : '[' . _items(map { summarise($_, $depth + 1, $seen) } @$value) . ']';
+  }
+  elsif ($type eq 'HASH') {
+    $inner = $depth >= SUMMARY_DEPTH && %$value ? '{...}'
+           : '{' . _items(map { _key($_) . ' => ' . summarise($value->{$_}, $depth + 1, $seen) }
+                          sort keys %$value) . '}';
+  }
+  elsif ($type eq 'SCALAR' || $type eq 'REF') {
+    $inner = '\\' . summarise($$value, $depth + 1, $seen);
+  }
+  elsif ($type eq 'CODE') {
+    $inner = 'sub { ... }';
+  }
+  else {
+    return "$value";
+  }
+
+  return defined $class ? "$class $inner" : $inner;
+}
+
+sub _items {
+  my @items = @_;
+  if (@items > SUMMARY_ITEMS) {
+    my $more = @items - SUMMARY_ITEMS;
+    splice @items, SUMMARY_ITEMS;
+    push @items, "... $more more";
+  }
+  return join ', ', @items;
+}
+
+sub _quote {
+  my($s) = @_;
+  return $s if looks_like_number($s) && $s !~ /^\s|\s$/;
+  $s =~ s/(['\\])/\\$1/g;
+  return "'$s'";
+}
+
+sub _key {
+  my($k) = @_;
+  return $k =~ /^-?[A-Za-z_]\w*\z/ ? $k : _quote($k);
+}
+
+# Devel::ebug's pad gives @arrays as a reference to a copy, which is what is
+# wanted, but evaluates %hashes in scalar context and so gets only a count;
+# ask for those again by reference.
+sub pad_fetch {
+  my($pad) = @_;
+  foreach my $name (grep { /^%/ } keys %$pad) {
+    my $ref = eval { $ebug->eval("\\$name") };
+    $pad->{$name} = $ref if !$@ && ref $ref;
+  }
+  return;
+}
+
+# The same values again as a tree, for the variables pane to open out one
+# level at a time.  Each node is { n => name, v => one-line summary } with
+# its children in k when it has any: [0] [1] for an array, {key} for a hash,
+# $* for what a scalar reference points at.  Bounded, since a stop sends
+# the whole thing whether or not anyone opens it.
+use constant {
+  TREE_DEPTH => 8,        # levels below the variable itself
+  TREE_ITEMS => 100,      # children of one node before "..."
+  TREE_NODES => 2000,     # nodes in one stop, all variables together
+};
+
+sub var_tree {
+  my($vars) = @_;
+  my $budget = TREE_NODES;
+  return [ map { _node($_, $vars->{$_}, 0, {}, \$budget) } sort keys %$vars ];
+}
+
+sub _node {
+  my($name, $value, $depth, $seen, $budget) = @_;
+  $$budget--;
+  my %node = (n => $name,
+              v => !$depth                      ? aggregate($name, $value)
+                 : defined $value && !ref $value ? trim(_quote($value))
+                 :                                 display($value));
+
+  return \%node unless ref $value && $depth < TREE_DEPTH;
+  my $addr = refaddr $value;
+  return \%node if $seen->{$addr};
+  local $seen->{$addr} = 1;
+
+  my $type = reftype $value;
+  my @kids;
+  if ($type eq 'ARRAY') {
+    @kids = map { [ "[$_]", $value->[$_] ] } 0 .. $#$value;
+  }
+  elsif ($type eq 'HASH') {
+    @kids = map { [ '{' . _key($_) . '}', $value->{$_} ] } sort keys %$value;
+  }
+  elsif ($type eq 'SCALAR' || $type eq 'REF') {
+    @kids = ([ '$*', $$value ]);
+  }
+
+  my @k;
+  foreach my $kid (@kids) {
+    if (@k >= TREE_ITEMS || $$budget <= 0) {
+      push @k, { n => '...', v => (@kids - @k) . ' more' };
+      last;
+    }
+    push @k, _node(@$kid, $depth + 1, $seen, $budget);
+  }
+  $node{k} = \@k if @k;
+  return \%node;
+}
+
+# A variable's value for the panes.  Aggregates are shown in round brackets,
+# as they would be written in a list assignment, to tell them apart from
+# references.
+sub aggregate {
+  my($name, $value) = @_;
+  my $text = summarise($value);
+  $text = '(' . substr($text, 1, -1) . ')'
+    if $name =~ /^[\@%]/ && ref $value && !blessed $value;
+  return trim($text);
 }
 
 # ---------------------------------------------------------------- state report
@@ -136,18 +288,24 @@ sub state_message {
   $msg{stack} = \@stack;
 
   my $pad = eval { $ebug->pad } || {};
-  $msg{pad} = { map { $_ => display($pad->{$_}) } keys %$pad };
+  pad_fetch($pad);
+  $msg{pad}  = { map { $_ => aggregate($_, $pad->{$_}) } keys %$pad };
+  $msg{vars} = var_tree($pad);
 
   $msg{watches} = [ map { watch_value($_) } @watches ];
 
   return \%msg;
 }
 
+# A watch on a bare @array or %hash is taken to mean its contents, not the
+# element count that evaluating it in scalar context would give.
 sub watch_value {
   my($expr) = @_;
-  my $value = eval { $ebug->eval($expr) };
+  my $whole = $expr =~ /^\s*([\@%]\$?[\w:]+)\s*\z/ ? $1 : undef;
+  my $value = eval { $ebug->eval(defined $whole ? "\\$whole" : $expr) };
   return { expr => $expr, value => $@ ? "<error: " . display($@, 80) . ">"
-                                      : display($value) };
+                                : defined $whole ? aggregate($whole, $value)
+                                : display($value) };
 }
 
 # ---------------------------------------------------------------- commands

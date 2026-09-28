@@ -8,21 +8,7 @@ It is a full screen terminal application: menu bar across the top, status
 line along the bottom, overlapping windows in between, and the muscle memory
 of a 1992 Borland IDE pointed at a modern perl.
 
-```
- File  Edit  Search  Run  Tools  Options  Window  Help              14:38:34
-╔═[■]══════════════════════ ~/src/hello.pl ══════════════════════════1═[↕]═╗
-║#!/usr/bin/perl                                                           ▲
-║use strict;                                                               ▓
-║use warnings;                                                             ▓
-║                                                                          ▓
-║my @greetings = qw(Hello Salut Hallo Ciao);                               ▓
-║                                                                          ▓
-║for my $g (@greetings) {                                                  ▓
-║    printf "%-6s is %s\n", $g, $where{$g} // 'a mystery';                 ▓
-║}                                                                         ▼
-╚═══════ 8:1 ══════◄▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓►──┘
- F2 Save  F3 Open  F9 Check  Ctrl-F9 Run  Alt-F3 Close  Alt-X Exit
-```
+![TurboPerl editing hello.pl](docs/hello.png)
 
 ## What it does
 
@@ -145,7 +131,10 @@ line that it can, and the marker moves with it, so what you see is where the
 program will actually stop.
 
 Watches, Variables and Call Stack share the strip at the bottom of the
-screen. Variables lists the lexicals in scope at the stop, watches are
+screen. Variables lists the lexicals in scope at the stop, one line each
+and cut short to fit; Right (or `+`, or Enter) opens an array, hash or
+reference out a level to show its elements, Left (or `-`) closes it again,
+and whatever is open stays open as you step. Watches are
 re-evaluated every time the program stops, and Enter on a call stack frame
 opens that file at that line. Everything the program prints goes to the
 Output window as it happens, so you can watch it accumulate while stepping.

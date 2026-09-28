@@ -41,6 +41,19 @@ type
     Line       : Integer;
   end;
 
+  { One row of the variables tree, in the order they are drawn: a variable,
+    then everything inside it, depth first.  Path names the node uniquely
+    and stays the same from one stop to the next, so a pane can remember
+    which nodes the user opened. }
+  TVarNode = record
+    Depth   : Integer;
+    Name    : AnsiString;
+    Value   : AnsiString;
+    Path    : AnsiString;
+    HasKids : Boolean;
+  end;
+  TVarNodes = array of TVarNode;
+
   TDebugSession = class
   private
     FProc     : TProcess;
@@ -59,6 +72,8 @@ type
 
     FStack    : array of TStackFrame;
     FPad      : TStringList;     { name=value }
+    FVars     : TVarNodes;
+    FVarCount : Integer;         { in use; FVars grows by doubling while read }
     { Watch results, in the order the expressions were sent.  Held by
       position rather than keyed by the expression, because an expression
       may perfectly well contain an equals sign. }
@@ -73,6 +88,7 @@ type
     function  WaitFor(const Ev: AnsiString; TimeoutMs: Integer): TJSONObject;
     procedure SetStoppedFrom(Msg: TJSONObject);
     procedure ReadWatches(Msg: TJSONObject);
+    procedure ReadVars(A: TJSONArray; Depth: Integer; const Parent: AnsiString);
     function  Send(const Cmd: AnsiString; Extra: TJSONObject): Integer;
   public
     Watches : TStringList;       { expressions, owned by the caller's UI }
@@ -109,6 +125,7 @@ type
     property CurSub   : AnsiString  read FSub;
     property CodeLine : AnsiString  read FCodeLine;
     property Pad      : TStringList read FPad;
+    property Vars     : TVarNodes   read FVars;
     property WatchVals: TStringList read FWatchVals;
     property Error    : AnsiString  read FError;
   end;
@@ -421,6 +438,7 @@ begin
   FPending.Clear;
   SetLength(FStack, 0);
   FPad.Clear;
+  SetLength(FVars, 0);
   FWatchVals.Clear;
   FState   := dsOff;
   FFile    := '';
@@ -533,6 +551,7 @@ begin
     FSub   := '';
     SetLength(FStack, 0);
     FPad.Clear;
+    SetLength(FVars, 0);
     Exit;
   end;
 
@@ -563,7 +582,37 @@ begin
     for i := 0 to Names.Count - 1 do
       FPad.Add(Names.Names[i] + '=' + Names.Items[i].AsString);
 
+  SetLength(FVars, 0);
+  FVarCount := 0;
+  ReadVars(TJSONArray(Msg.Find('vars')), 0, '');
+  SetLength(FVars, FVarCount);
+
   ReadWatches(Msg);
+end;
+
+procedure TDebugSession.ReadVars(A: TJSONArray; Depth: Integer;
+                                 const Parent: AnsiString);
+var
+  i, n: Integer;
+  O   : TJSONObject;
+  Kids: TJSONArray;
+begin
+  if A = nil then Exit;
+  for i := 0 to A.Count - 1 do
+  begin
+    O := TJSONObject(A.Items[i]);
+    Kids := TJSONArray(O.Find('k'));
+    n := FVarCount;
+    Inc(FVarCount);
+    if n >= Length(FVars) then SetLength(FVars, 2 * n + 16);
+    FVars[n].Depth   := Depth;
+    FVars[n].Name    := O.Get('n', '');
+    FVars[n].Value   := O.Get('v', '');
+    { #1 cannot turn up in a name, so paths cannot run into one another. }
+    FVars[n].Path    := Parent + #1 + FVars[n].Name;
+    FVars[n].HasKids := (Kids <> nil) and (Kids.Count > 0);
+    ReadVars(Kids, Depth + 1, FVars[n].Path);
+  end;
 end;
 
 procedure TDebugSession.ReadWatches(Msg: TJSONObject);

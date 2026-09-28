@@ -1,13 +1,15 @@
 { ========================================================================== }
 {  TurboPerl - Unit: TPViews                                                 }
 {                                                                            }
-{  The two panes that report back from perl:                                 }
+{  The panes that report back from perl and from the debugger:              }
 {                                                                            }
 {    Output   - whatever the script wrote, as plain scrollable text.         }
 {    Messages - the diagnostics parsed out of it, one per line; pressing      }
 {               Enter on one takes you to the offending source line.         }
+{    Info     - the debugger's watches, call stack and variables; the        }
+{               variables as a tree that opens out a level at a time.        }
 {                                                                            }
-{  Both windows hide rather than close, so the IDE can keep a pointer to     }
+{  The windows hide rather than close, so the IDE can keep a pointer to      }
 {  them for the lifetime of the session and the user never loses a run log   }
 {  by pressing Alt-F3.                                                       }
 { ========================================================================== }
@@ -20,7 +22,7 @@ interface
 uses
   Objects, Drivers, Views, App,
   SysUtils, Classes,
-  TPConst, TPPerl;
+  TPConst, TPPerl, TPDebug;
 
 type
   { One parsed diagnostic, kept alongside its display text. }
@@ -67,6 +69,7 @@ type
     function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
     procedure   SelectItem(Item: Sw_Integer); virtual;
     procedure   HandleEvent(var Event: TEvent); virtual;
+    function    GetPalette: PPalette; virtual;
     procedure   SetMessages(const M: TPerlMsgList);
     procedure   Clear;
     function    Current: TMsgItem;
@@ -88,6 +91,7 @@ type
     constructor Init(var Bounds: Objects.TRect; AHScrollBar, AVScrollBar: PScrollBar);
     destructor  Done; virtual;
     function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
+    function    GetPalette: PPalette; virtual;
     procedure   SelectItem(Item: Sw_Integer); virtual;
     procedure   HandleEvent(var Event: TEvent); virtual;
     procedure   Clear;
@@ -96,14 +100,47 @@ type
     function    CurrentTarget(out AFile: AnsiString; out ALine: Integer): Boolean;
   end;
 
+  { ---------------------------------------------------------------------- }
+  {  The debugger's variables, as a tree.  Each variable takes one line,    }
+  {  cut short to fit; one with anything inside it can be opened to show    }
+  {  its elements a line apiece, and those opened in turn.  What is open    }
+  {  is remembered by path, so it stays open as the program is stepped.    }
+  {                                                                         }
+  {    Right, +, Enter   open (Right again moves to the first element)      }
+  {    Left, -, Enter    close (Left on an element moves to its parent)     }
+  { ---------------------------------------------------------------------- }
+
+  PVarView = ^TVarView;
+  TVarView = object(TInfoView)
+    Nodes : TVarNodes;
+    Rows  : array of Integer;   { visible row -> index into Nodes }
+    Opened: TStringList;        { paths of the nodes the user opened }
+    constructor Init(var Bounds: Objects.TRect; AHScrollBar, AVScrollBar: PScrollBar);
+    destructor  Done; virtual;
+    function    GetText(Item, MaxLen: Sw_Integer): String; virtual;
+    procedure   SelectItem(Item: Sw_Integer); virtual;
+    procedure   HandleEvent(var Event: TEvent); virtual;
+    procedure   SetVars(const V: TVarNodes);
+    function    IsOpen(Node: Integer): Boolean;
+    procedure   SetOpen(Item: Sw_Integer; Open: Boolean);
+    procedure   Rebuild(const FocusPath: AnsiString);
+    function    RowOf(const Path: AnsiString): Integer;
+  end;
+
   PInfoWindow = ^TInfoWindow;
   TInfoWindow = object(TWindow)
     View    : PInfoView;
     Caption : String[64];
     constructor Init(var Bounds: Objects.TRect; const ATitle: String; ANumber: Integer);
+    function    MakeView(var R: Objects.TRect; HS, VS: PScrollBar): PInfoView; virtual;
     function    GetTitle(MaxSize: Sw_Integer): TTitleStr; virtual;
     procedure   Close; virtual;
     procedure   SetCaption(const S: String);
+  end;
+
+  PVarWindow = ^TVarWindow;
+  TVarWindow = object(TInfoWindow)
+    function    MakeView(var R: Objects.TRect; HS, VS: PScrollBar): PInfoView; virtual;
   end;
 
   PMsgWindow = ^TMsgWindow;
@@ -117,6 +154,16 @@ type
   end;
 
 implementation
+
+{ TListViewer's own palette (26..29) indexes a dialog's, which a plain window
+  does not have: every colour falls off the end and comes out as ErrorAttr,
+  blinking white on red.  These lists live in windows, so map onto the
+  window's palette instead - its scroller text (6) and selected text (7),
+  the same colours as the Output window, with the active frame (2) for the
+  column divider. }
+const
+  CWindowList = #6#6#7#6#2;
+
 
 { ========================================================================== }
 {  TOutputView                                                               }
@@ -327,6 +374,13 @@ begin
   Result := S;
 end;
 
+function TMsgView.GetPalette: PPalette;
+const
+  P: String[Length(CWindowList)] = CWindowList;
+begin
+  Result := PPalette(@P);
+end;
+
 function TMsgView.Current: TMsgItem;
 begin
   Result := nil;
@@ -452,6 +506,13 @@ begin
   Result := (AFile <> '') and (ALine > 0);
 end;
 
+function TInfoView.GetPalette: PPalette;
+const
+  P: String[Length(CWindowList)] = CWindowList;
+begin
+  Result := PPalette(@P);
+end;
+
 procedure TInfoView.SelectItem(Item: Sw_Integer);
 begin
   if (Item >= 0) and (Item < Items.Count) then
@@ -490,8 +551,18 @@ begin
 
   GetExtent(R);
   R.Grow(-1, -1);
-  View := New(PInfoView, Init(R, HS, VS));
+  View := MakeView(R, HS, VS);
   Insert(View);
+end;
+
+function TInfoWindow.MakeView(var R: Objects.TRect; HS, VS: PScrollBar): PInfoView;
+begin
+  Result := New(PInfoView, Init(R, HS, VS));
+end;
+
+function TVarWindow.MakeView(var R: Objects.TRect; HS, VS: PScrollBar): PInfoView;
+begin
+  Result := New(PVarView, Init(R, HS, VS));
 end;
 
 function TInfoWindow.GetTitle(MaxSize: Sw_Integer): TTitleStr;
@@ -509,6 +580,170 @@ end;
 procedure TInfoWindow.Close;
 begin
   Hide;
+end;
+
+{ ========================================================================== }
+{  TVarView                                                                  }
+{ ========================================================================== }
+
+constructor TVarView.Init(var Bounds: Objects.TRect;
+                          AHScrollBar, AVScrollBar: PScrollBar);
+begin
+  inherited Init(Bounds, AHScrollBar, AVScrollBar);
+  Opened := TStringList.Create;
+  Opened.Sorted     := True;
+  Opened.Duplicates := dupIgnore;
+end;
+
+destructor TVarView.Done;
+begin
+  Opened.Free;
+  inherited Done;
+end;
+
+function ParentPath(const Path: AnsiString): AnsiString;
+var
+  P: Integer;
+begin
+  P := LastDelimiter(#1, Path);
+  if P <= 1 then Result := '' else Result := Copy(Path, 1, P - 1);
+end;
+
+function TVarView.IsOpen(Node: Integer): Boolean;
+begin
+  Result := Nodes[Node].HasKids and (Opened.IndexOf(Nodes[Node].Path) >= 0);
+end;
+
+{ A new stop: the same variables, most likely, with new values. }
+procedure TVarView.SetVars(const V: TVarNodes);
+var
+  Keep: AnsiString;
+begin
+  Keep := '';
+  if (Focused >= 0) and (Focused < Length(Rows)) then
+    Keep := Nodes[Rows[Focused]].Path;
+  Nodes := V;
+  Rebuild(Keep);
+end;
+
+{ Work out which nodes show - those with no closed node above them - and
+  put the focus back on FocusPath, or the nearest of its parents still on
+  show when it has been closed away. }
+procedure TVarView.Rebuild(const FocusPath: AnsiString);
+var
+  i, n, Row: Integer;
+  P: AnsiString;
+begin
+  SetLength(Rows, Length(Nodes));
+  n := 0;
+  i := 0;
+  while i < Length(Nodes) do
+  begin
+    Rows[n] := i;
+    Inc(n);
+    if Nodes[i].HasKids and not IsOpen(i) then
+    begin
+      Row := Nodes[i].Depth;
+      Inc(i);
+      while (i < Length(Nodes)) and (Nodes[i].Depth > Row) do Inc(i);
+    end
+    else
+      Inc(i);
+  end;
+  SetLength(Rows, n);
+  SetRange(n);
+
+  Row := -1;
+  P := FocusPath;
+  while (Row < 0) and (P <> '') do
+  begin
+    Row := RowOf(P);
+    P := ParentPath(P);
+  end;
+  if Row < 0 then Row := 0;
+  if n > 0 then FocusItem(Row);
+  DrawView;
+end;
+
+function TVarView.RowOf(const Path: AnsiString): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to High(Rows) do
+    if Nodes[Rows[i]].Path = Path then Exit(i);
+  Result := -1;
+end;
+
+procedure TVarView.SetOpen(Item: Sw_Integer; Open: Boolean);
+var
+  Node: Integer;
+begin
+  if (Item < 0) or (Item >= Length(Rows)) then Exit;
+  Node := Rows[Item];
+  if not Nodes[Node].HasKids then Exit;
+  if Open then Opened.Add(Nodes[Node].Path)
+  else if Opened.IndexOf(Nodes[Node].Path) >= 0 then
+    Opened.Delete(Opened.IndexOf(Nodes[Node].Path));
+  Rebuild(Nodes[Node].Path);
+end;
+
+function TVarView.GetText(Item, MaxLen: Sw_Integer): String;
+var
+  Node: Integer;
+  S   : AnsiString;
+begin
+  Result := '';
+  if (Item < 0) or (Item >= Length(Rows)) then Exit;
+  Node := Rows[Item];
+  S := StringOfChar(' ', 2 * Nodes[Node].Depth);
+  if not Nodes[Node].HasKids then S := S + '  '
+  else if IsOpen(Node)       then S := S + '- '
+  else                            S := S + '+ ';
+  S := S + Nodes[Node].Name;
+  { Once open, the elements below say it all. }
+  if not IsOpen(Node) then S := S + ' = ' + Nodes[Node].Value;
+  if MaxLen > 255 then MaxLen := 255;
+  if Length(S) > MaxLen then
+    S := Copy(S, 1, MaxLen - 3) + '...';
+  Result := S;
+end;
+
+{ A double click, or Enter: open or close. }
+procedure TVarView.SelectItem(Item: Sw_Integer);
+begin
+  if (Item >= 0) and (Item < Length(Rows)) then
+    SetOpen(Item, not IsOpen(Rows[Item]));
+end;
+
+procedure TVarView.HandleEvent(var Event: TEvent);
+var
+  Node: Integer;
+begin
+  if (Event.What = evKeyDown) and (Focused >= 0) and (Focused < Length(Rows)) then
+  begin
+    Node := Rows[Focused];
+    if (Event.KeyCode = kbEnter) then
+      SelectItem(Focused)
+    else if (Event.KeyCode = kbRight) or (Event.CharCode = '+') then
+    begin
+      if not IsOpen(Node) then SetOpen(Focused, True)
+      else if Event.KeyCode = kbRight then FocusItem(Focused + 1);
+    end
+    else if (Event.KeyCode = kbLeft) or (Event.CharCode = '-') then
+    begin
+      if IsOpen(Node) then SetOpen(Focused, False)
+      else if (Event.KeyCode = kbLeft) and (Nodes[Node].Depth > 0) then
+        FocusItem(RowOf(ParentPath(Nodes[Node].Path)));
+    end
+    else
+    begin
+      inherited HandleEvent(Event);
+      Exit;
+    end;
+    ClearEvent(Event);
+    Exit;
+  end;
+  inherited HandleEvent(Event);
 end;
 
 { ========================================================================== }
