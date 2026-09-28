@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Badly laid out on purpose: Tools / Tidy runs it through perltidy
 # and replaces the buffer, as a single undo step.
