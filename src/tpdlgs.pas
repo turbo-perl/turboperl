@@ -409,14 +409,51 @@ begin
 end;
 
 procedure ShowAbout;
-begin
-  MessageBox(
+const
+  Msg =
     #3'TurboPerl ' + TPVersion + #13 +
     #3'' + TPCopyright + #13 + #13 +
     #3'Built with Free Pascal and Free Vision' + #13 +
     #3'Editing Perl the way Turbo Pascal edited Pascal' + #13 + #13 +
-    #3'F9 checks syntax   Ctrl-F9 runs   F1 reads the docs',
-    nil, mfInformation or mfOKButton);
+    #3'F9 checks syntax   Ctrl-F9 runs   F1 reads the docs';
+
+  { MessageBox's fixed 40x9 box leaves room for only a 36x4 message, which
+    clips text like this. Size the box to the message instead, keeping
+    6 columns for the border and padding and 5 rows for the border, the
+    blank line, and the button row. }
+  HMargin = 6;
+  VMargin = 5;
+
+  function TextExtent(const S: String): Objects.TPoint;
+  var
+    I, LineLen: Sw_Integer;
+  begin
+    Result.X := 0;
+    Result.Y := 1;
+    LineLen := 0;
+    for I := 1 to Length(S) do
+      if S[I] = #13 then
+      begin
+        Inc(Result.Y);
+        LineLen := 0;
+      end
+      else if S[I] >= ' ' then
+      begin
+        Inc(LineLen);
+        if LineLen > Result.X then Result.X := LineLen;
+      end;
+  end;
+
+var
+  Size: Objects.TPoint;
+  R: Objects.TRect;
+begin
+  Size := TextExtent(Msg);
+  R.Assign((ScreenWidth - Size.X - HMargin) div 2,
+           (ScreenHeight - Size.Y - VMargin) div 2,
+           (ScreenWidth - Size.X - HMargin) div 2 + Size.X + HMargin,
+           (ScreenHeight - Size.Y - VMargin) div 2 + Size.Y + VMargin);
+  MessageBoxRect(R, Msg, nil, mfInformation or mfOKButton);
 end;
 
 end.
