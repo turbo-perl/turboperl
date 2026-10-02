@@ -8,7 +8,8 @@
 FPC       ?= fpc
 PREFIX    ?= /usr/local
 FVUNITS   ?= $(shell $(FPC) -iV >/dev/null 2>&1 && \
-               echo /usr/lib/x86_64-linux-gnu/fpc/$$($(FPC) -iV)/units/$$($(FPC) -iTP)-$$($(FPC) -iTO)/fv)
+               d=$$(dirname $$(realpath $$($(FPC) -PB))) && \
+               echo $$d/units/$$($(FPC) -iTP)-$$($(FPC) -iTO)/fv)
 
 SRCDIR    := src
 UNITDIR   := units

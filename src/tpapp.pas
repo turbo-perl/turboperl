@@ -98,6 +98,13 @@ type
 
 implementation
 
+{$IFDEF UNIX}
+type
+  { Some BaseUnix/TermIO implementations (e.g. Darwin) expose the struct
+    as "termios" rather than the "TTermios" alias Linux provides. }
+  TTermios = termios;
+{$ENDIF}
+
 const
   { How long a tool may take before we give up on it. }
   ToolTimeoutMs = 120 * 1000;
