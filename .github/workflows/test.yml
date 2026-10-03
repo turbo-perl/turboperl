@@ -26,11 +26,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             fpc fp-units-fv tmux perl perl-doc cpanminus
 
-      # The integrated debugger drives Devel::ebug, which is not packaged
-      # for Ubuntu.  --notest because its own suite wants Expect and a
-      # terminal, which is not what is being tested here.
-      - name: Install Devel::ebug
-        run: sudo cpanm --notest --quiet Devel::ebug
+      # The modules in cpanfile: Devel::ebug, for the integrated debugger,
+      # is not packaged for Ubuntu.  --notest because its own suite wants
+      # Expect and a terminal, which is not what is being tested here.
+      - name: Install Perl modules
+        run: sudo cpanm --notest --quiet --installdeps .
 
       - name: Versions
         run: |
@@ -45,18 +45,84 @@ jobs:
       - name: Test
         run: make test
 
+  # Windows builds with build.pl rather than make, and drives the interface
+  # tests through VisionDrive rather than tmux, so it is a job of its own.
+  windows:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installed where a user's winget install puts it, and left off the
+      # PATH, so build.pl finding it is tested too.
+      - name: Install Free Pascal
+        uses: ./.github/actions/install-fpc-windows
+
+      # The modules in cpanfile.  --notest, as on Linux: their own suites
+      # are not what is being tested here.
+      - name: Install Perl modules
+        run: cpanm --notest --quiet --installdeps .
+
+      - name: Versions
+        run: |
+          C:\FPC\3.2.2\bin\i386-win32\fpc.exe -iV
+          perl -v | Select-Object -Skip 1 -First 1
+          perl -e 'print eval { require Devel::ebug; qq{Devel::ebug $Devel::ebug::VERSION\n} } || qq{Devel::ebug not installed\n}'
+
+      # The interface tests drive the IDE through VisionDrive, as the Linux
+      # ones do through tmux.
+      - name: Check out VisionDrive
+        uses: actions/checkout@v4
+        with:
+          repository: turbo-perl/VisionDrive
+          path: VisionDrive
+
+      - name: Build VisionDrive
+        run: |
+          New-Item -ItemType Directory -Force VisionDrive\units | Out-Null
+          C:\FPC\3.2.2\bin\i386-win32\fpc.exe -Px86_64 -FUVisionDrive\units `
+            -FEVisionDrive VisionDrive\visiondrive.pas
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "VISIONDRIVE=$env:GITHUB_WORKSPACE\VisionDrive\visiondrive.exe" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: perl build.pl
+
+      - name: Test
+        run: perl build.pl test
+
+      # Built on every push, as the release builds it, so that a broken
+      # installer shows up before a release does; then installed, with the
+      # PATH task, and uninstalled again.
+      - name: Install Inno Setup
+        uses: ./.github/actions/install-inno-setup
+
+      - name: Build the installer
+        run: perl build.pl installer
+
+      - name: Check the installer
+        run: |
+          $setup = Get-Item packages\turboperl-*-setup.exe
+          $version = $setup.Name -replace '^turboperl-(.*)-setup\.exe$', '$1'
+          ./tests/check-installer.ps1 $setup.FullName $version
+
   # Branch protection requires a check called "test".  The matrix jobs are
-  # named after their runners, so this one stands for all of them, and
-  # runners can come and go without the protection rule changing.  It must
-  # run even when a build fails: a skipped required check counts as passed.
+  # named after their runners, so this one stands for all of them, Windows
+  # included, and runners can come and go without the protection rule
+  # changing.  It must run even when a build fails: a skipped required
+  # check counts as passed.
   test:
-    needs: build
+    needs: [build, windows]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - name: Every build passed
         env:
-          RESULT: ${{ needs.build.result }}
+          LINUX: ${{ needs.build.result }}
+          WINDOWS: ${{ needs.windows.result }}
         run: |
-          echo "builds: $RESULT"
-          test "$RESULT" = success
+          echo "Linux builds: $LINUX, Windows: $WINDOWS"
+          test "$LINUX" = success
+          test "$WINDOWS" = success

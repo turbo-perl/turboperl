@@ -53,6 +53,10 @@ type
 var
   Cfg: TConfig;
 
+{ The user's home directory: $HOME, or on Windows, where that is seldom set,
+  %USERPROFILE%.  '' when there is neither. }
+function  HomeDir: AnsiString;
+
 procedure DefaultConfig;
 function  ConfigFileName: AnsiString;
 function  LoadConfig: Boolean;
@@ -65,7 +69,7 @@ function TokColour(T: TPerlTok): Byte;
 function DetectLibDir: AnsiString;
 
 { A path for showing, with the home directory written as ~.  The second
-  form takes the home directory rather than asking $HOME, for testing. }
+  form takes the home directory rather than asking HomeDir, for testing. }
 function TildePath(const Path: AnsiString): AnsiString;
 function TildePath(const Path, Home: AnsiString): AnsiString;
 
@@ -149,31 +153,51 @@ end;
 
 { -------------------------------------------------------------------------- }
 
+function HomeDir: AnsiString;
+begin
+  Result := GetEnvironmentVariable('HOME');
+  {$ifdef MSWINDOWS}
+  if Result = '' then Result := GetEnvironmentVariable('USERPROFILE');
+  {$endif}
+end;
+
 function ConfigFileName: AnsiString;
 var
   Home: AnsiString;
 begin
-  Home := GetEnvironmentVariable('HOME');
+  Home := HomeDir;
   if Home = '' then Home := GetCurrentDir;
   Result := IncludeTrailingPathDelimiter(Home) + '.turboperlrc';
 end;
 
 function TildePath(const Path: AnsiString): AnsiString;
 begin
-  Result := TildePath(Path, GetEnvironmentVariable('HOME'));
+  Result := TildePath(Path, HomeDir);
 end;
 
 function TildePath(const Path, Home: AnsiString): AnsiString;
 var
   H: AnsiString;
+
+  { Windows takes / as well as \ and ignores case in file names. }
+  function Same(const A, B: AnsiString): Boolean;
+  begin
+    if FileNameCaseSensitive then
+      Result := SetDirSeparators(A) = SetDirSeparators(B)
+    else
+      Result := CompareText(SetDirSeparators(A), SetDirSeparators(B)) = 0;
+  end;
+
 begin
   Result := Path;
   H := ExcludeTrailingPathDelimiter(Home);
   { An empty $HOME, or one of /, would make ~ of everything. }
   if H = '' then Exit;
-  if Path = H then
+  if Same(Path, H) then
     Result := '~'
-  else if Copy(Path, 1, Length(H) + 1) = H + PathDelim then
+  else if (Length(Path) > Length(H)) and
+          (Path[Length(H) + 1] in AllowDirectorySeparators) and
+          Same(Copy(Path, 1, Length(H)), H) then
     Result := '~' + Copy(Path, Length(H) + 1, Length(Path));
 end;
 

@@ -2,8 +2,8 @@ name: release
 
 # A push to main that changes TPVersion is a release: the commit pushed,
 # normally the merge commit of a pull request, is tagged v<version>, and .deb
-# packages built from it for amd64 and arm64 are attached to the GitHub
-# release of that tag.  Pushes that leave the version alone do nothing.
+# packages built from it for amd64 and arm64, and a zip and an installer for
+# 64-bit Windows, are attached to the GitHub release of that tag.  Pushes that leave the version alone do nothing.
 #
 # It runs on the push rather than on the pull request closing so that the
 # run belongs to the commit that gets tagged, and shows up beside its tests.
@@ -106,10 +106,69 @@ jobs:
           path: ${{ steps.deb.outputs.file }}
           if-no-files-found: error
 
+  # Built with build.pl, which takes the version from the IDE as make deb
+  # does.
+  package-windows:
+    needs: version
+    if: needs.version.outputs.changed == 'true'
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Free Pascal
+        uses: ./.github/actions/install-fpc-windows
+
+      # cpanfile's develop modules are what build.pl needs for the zip.
+      - name: Install Perl modules
+        run: cpanm --notest --quiet --installdeps --with-develop .
+
+      - name: Build the zip
+        run: perl build.pl zip
+
+      # Unzip it and run what is inside, which proves the zip is whole and
+      # is the version being tagged.
+      - name: Check the zip
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          Expand-Archive "packages\turboperl-$env:VERSION-win64.zip" $env:RUNNER_TEMP
+          $dir = Join-Path $env:RUNNER_TEMP "turboperl-$env:VERSION-win64"
+          $got = & (Join-Path $dir 'turboperl.exe') --version
+          Write-Output $got
+          if ($got -ne "TurboPerl $env:VERSION") { exit 1 }
+          if (-not (Test-Path (Join-Path $dir 'lib\TurboPerl\Debug\Bridge.pm'))) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-win64
+          path: packages/*.zip
+          if-no-files-found: error
+
+      - name: Install Inno Setup
+        uses: ./.github/actions/install-inno-setup
+
+      - name: Build the installer
+        run: perl build.pl installer
+
+      # Install it, PATH and all, run what it installed, and uninstall it.
+      - name: Check the installer
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./tests/check-installer.ps1 "packages\turboperl-$env:VERSION-setup.exe" $env:VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-win64
+          path: packages/*-setup.exe
+          if-no-files-found: error
+
   # Only once every package has built, so a failure on one architecture
   # never leaves a tag or a release with half its packages.
   release:
-    needs: [version, package]
+    needs: [version, package, package-windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -120,13 +179,25 @@ jobs:
           path: packages
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zip-*
+          path: packages
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: setup-*
+          path: packages
+          merge-multiple: true
+
       - name: Tag and release
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l packages
-          gh release create "v$VERSION" packages/*.deb \
+          gh release create "v$VERSION" packages/*.deb packages/*.zip packages/*-setup.exe \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "TurboPerl $VERSION" \

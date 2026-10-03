@@ -14,6 +14,7 @@ uses
   Objects, Drivers, Views, Menus, App, MsgBox, StdDlg, Editors,
   FVConsts, Gadgets, Video,
   {$IFDEF UNIX} BaseUnix, TermIO, {$ENDIF}
+  {$IFDEF MSWINDOWS} TPWinCon, {$ENDIF}
   SysUtils, Classes,
   TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText, TPDebug;
 
@@ -91,6 +92,9 @@ type
     procedure SuspendScreen;
     procedure ResumeScreen;
     procedure ShowUserScreen;
+    {$IFDEF MSWINDOWS}
+    procedure ShellOnConsole;
+    {$ENDIF}
 
     procedure Complain(const S: AnsiString);
     procedure Caution(const S: AnsiString);
@@ -144,6 +148,10 @@ var
     means we never managed to find out. }
   ConsoleRow : Integer = 0;
   ConsoleCol : Integer = 0;
+  {$IFDEF MSWINDOWS}
+  { Whether the IDE has a console screen buffer of its own; see TPWinCon. }
+  OwnScreen : Boolean = False;
+  {$ENDIF}
   {$IFDEF UNIX}
   { The terminal settings as the shell had them, so a console run gets the
     console back exactly as it was. }
@@ -215,12 +223,23 @@ const
 var
   PaletteSet : Boolean = False;
 
+{ The Windows console prints OSC 4 rather than obeying it, so there the
+  console's own colour table is set instead, through its API. }
 procedure SetVgaPalette;
 var
   i: Integer;
   S: AnsiString;
+  {$IFDEF MSWINDOWS}
+  RGB: array[0..15] of LongWord;
+  {$ENDIF}
 begin
   if not Cfg.VgaPalette then Exit;
+  {$IFDEF MSWINDOWS}
+  for i := 0 to 15 do
+    RGB[i] := StrToInt('$' + Copy(VgaRGB[i], 1, 2) + Copy(VgaRGB[i], 4, 2) +
+                       Copy(VgaRGB[i], 7, 2));
+  PaletteSet := SetConsolePalette(RGB);
+  {$ELSE}
   if Copy(GetEnvironmentVariable('TERM'), 1, 5) = 'linux' then Exit;
   S := #27']4';
   for i := 0 to 15 do
@@ -228,13 +247,18 @@ begin
   Write(S, #7);
   Flush(Output);
   PaletteSet := True;
+  {$ENDIF}
 end;
 
 procedure RestorePalette;
 begin
   if not PaletteSet then Exit;
+  {$IFDEF MSWINDOWS}
+  RestoreConsolePalette;
+  {$ELSE}
   Write(#27']104'#7);
   Flush(Output);
+  {$ENDIF}
   PaletteSet := False;
 end;
 
@@ -378,6 +402,10 @@ begin
     Flush(Output);
   end;
   DebugScreenSwitch;
+  {$IFDEF MSWINDOWS}
+  { Before the video unit starts, which draws wherever Output points. }
+  OwnScreen := UseOwnScreen;
+  {$ENDIF}
 
   {$IFDEF UNIX} HideTmux; {$ENDIF}
   inherited Init;
@@ -974,6 +1002,12 @@ var
 begin
   Smcup := '';
   Rmcup := '';
+  {$IFDEF MSWINDOWS}
+  { The console has a screen buffer of the IDE's own instead (see TPWinCon),
+    and does not take the sequences a tput from Git or MSYS2 would hand
+    back: they would be printed over the IDE. }
+  Exit;
+  {$ENDIF}
   T := FindOnPath('tput');
   if T = '' then Exit;
 
@@ -1038,8 +1072,34 @@ begin
     Flush(Output);
   end
   else
+  {$IFDEF MSWINDOWS}
+  if OwnScreen then
+    ShowConsole
+  else
+  {$ENDIF}
     Drivers.DoneVideo;
 end;
+
+{$IFDEF MSWINDOWS}
+{ Free Vision's own Shell to OS tears the video unit down and runs
+  %COMSPEC% wherever it was drawing, which on Windows is the IDE's screen
+  buffer.  The shell belongs on the console, like a console run, so that
+  what is done there is still on the user screen afterwards.  Its DosShell
+  is not virtual, so HandleEvent takes the command before it can. }
+procedure TTurboPerl.ShellOnConsole;
+var
+  Shell: AnsiString;
+begin
+  Shell := GetEnvironmentVariable('COMSPEC');
+  if Shell = '' then Shell := 'cmd.exe';
+  SuspendScreen;
+  WriteLn;
+  WriteLn('--- ', TPTitle, ': type EXIT to return ---');
+  Flush(Output);
+  RunOnConsole(Shell, [], '', []);
+  ResumeScreen;
+end;
+{$ENDIF}
 
 { Turbo Pascal's user screen: step off the IDE's display and back onto the
   terminal underneath, which is where a console run left its output. }
@@ -1066,6 +1126,17 @@ begin
     InitSysError;
   end
   else
+  {$IFDEF MSWINDOWS}
+  if OwnScreen then
+  begin
+    { The IDE's buffer is just as it was left. }
+    ShowOwnScreen;
+    Drivers.InitKeyboard;
+    InitEvents;
+    InitSysError;
+  end
+  else
+  {$ENDIF}
   begin
     Drivers.InitKeyboard;
     Drivers.InitVideo;
@@ -1753,6 +1824,14 @@ procedure TTurboPerl.HandleEvent(var Event: TEvent);
 var
   Ed: PPerlEditor;
 begin
+  {$IFDEF MSWINDOWS}
+  if (Event.What = evCommand) and (Event.Command = cmDosShell) then
+  begin
+    ShellOnConsole;
+    ClearEvent(Event);
+    Exit;
+  end;
+  {$ENDIF}
   inherited HandleEvent(Event);
 
   if Event.What <> evCommand then Exit;

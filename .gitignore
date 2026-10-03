@@ -1,6 +1,7 @@
 # Build output
 /units/
 /turboperl
+/turboperl.exe
 /packages/
 
 # Compiled test programs; their sources are tracked
@@ -9,6 +10,7 @@
 /tests/hltest
 /tests/perltest
 /tests/texttest
+/tests/*.exe
 
 # Free Pascal intermediates, wherever they land
 *.o

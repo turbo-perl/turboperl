@@ -1,0 +1,33 @@
+name: Install Free Pascal on Windows
+description: >
+  Installs Free Pascal 3.2.2 into C:\FPC\3.2.2 from the official installer,
+  the one winget uses, checked against its SHA256 and kept between runs.
+  FPC's bin directory is deliberately left off the PATH: build.pl finds
+  fpc.exe there by itself.
+
+runs:
+  using: composite
+  steps:
+    # Fetched from SourceForge, which is slow and sometimes flaky.
+    - name: Cache the Free Pascal installer
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}\fpc-installer
+        key: fpc-3.2.2-win32-and-win64
+
+    - name: Install Free Pascal
+      shell: pwsh
+      env:
+        FPC_INSTALLER: ${{ runner.temp }}\fpc-installer\fpc-3.2.2.win32.and.win64.exe
+      run: |
+        if (-not (Test-Path $env:FPC_INSTALLER)) {
+          New-Item -ItemType Directory -Force (Split-Path $env:FPC_INSTALLER) | Out-Null
+          curl.exe -fsSL --retry 3 -o $env:FPC_INSTALLER `
+            https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download
+        }
+        $hash = (Get-FileHash $env:FPC_INSTALLER -Algorithm SHA256).Hash
+        if ($hash -ne '8C255390544B051388B577EB61C6191A04883264AFE0E3369B3600A56DAF7BDE') {
+          throw "unexpected installer hash $hash"
+        }
+        Start-Process -Wait -FilePath $env:FPC_INSTALLER `
+          -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=C:\FPC\3.2.2'

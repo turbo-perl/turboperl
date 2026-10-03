@@ -75,6 +75,11 @@ function RunOnConsole(const Exe: AnsiString; const Args: array of AnsiString;
 { Locate a program on PATH.  Returns '' when it is not there. }
 function FindOnPath(const Name: AnsiString): AnsiString;
 
+{ Set the program P runs and its arguments, so that the program sees
+  exactly those arguments.  Every TProcess here is set up through this. }
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
+
 { Pull the "at FILE line N" locations out of a block of perl output. }
 function ParseDiagnostics(const Output: AnsiString): TPerlMsgList;
 
@@ -93,6 +98,42 @@ implementation
 
 { -------------------------------------------------------------------------- }
 
+{ The program Base names, or '' if there is none.  On Windows a program is
+  only a file with one of the extensions in PATHEXT, and the name may leave
+  it off: perl means perl.exe.  Strawberry Perl keeps extensionless Perl
+  scripts beside their .bat wrappers - perltidy and perltidy.bat - and the
+  script is not something Windows can run, so a bare name never matches. }
+function ExistingProgram(const Base: AnsiString): AnsiString;
+{$ifdef MSWINDOWS}
+var
+  Exts, Ext: AnsiString;
+  P: Integer;
+begin
+  Result := '';
+  Exts := GetEnvironmentVariable('PATHEXT');
+  if Exts = '' then Exts := '.COM;.EXE;.BAT;.CMD';
+  { A name that already carries one of the extensions is taken as it is. }
+  if (ExtractFileExt(Base) <> '') and
+     (Pos(';' + UpperCase(ExtractFileExt(Base)) + ';',
+          ';' + UpperCase(Exts) + ';') > 0) and
+     FileExists(Base) then
+    Exit(Base);
+  while Exts <> '' do
+  begin
+    P := Pos(';', Exts);
+    if P = 0 then P := Length(Exts) + 1;
+    Ext  := Copy(Exts, 1, P - 1);
+    Delete(Exts, 1, P);
+    if (Ext <> '') and FileExists(Base + LowerCase(Ext)) then
+      Exit(Base + LowerCase(Ext));
+  end;
+end;
+{$else}
+begin
+  if FileExists(Base) then Result := Base else Result := '';
+end;
+{$endif}
+
 function FindOnPath(const Name: AnsiString): AnsiString;
 var
   Path, Dir, Candidate: AnsiString;
@@ -104,10 +145,7 @@ begin
   { An explicit path is taken as given.  Windows accepts a forward slash as
     well as its own separator, so look for either. }
   if (Pos('/', Name) > 0) or (Pos(PathDelim, Name) > 0) then
-  begin
-    if FileExists(Name) then Result := Name;
-    Exit;
-  end;
+    Exit(ExistingProgram(Name));
 
   Path := GetEnvironmentVariable('PATH');
   while Path <> '' do
@@ -127,13 +165,132 @@ begin
       Delete(Path, 1, P);
     end;
     if Dir = '' then Continue;
-    Candidate := IncludeTrailingPathDelimiter(Dir) + Name;
-    if FileExists(Candidate) then
+    Candidate := ExistingProgram(IncludeTrailingPathDelimiter(Dir) + Name);
+    if Candidate <> '' then
       Exit(Candidate);
   end;
 end;
 
 { -------------------------------------------------------------------------- }
+
+{ Windows hands a program one command line, which the program splits into
+  arguments itself, and TProcess joins them carelessly: it puts quotes
+  round an argument with a space in it, but not if it already holds a ",
+  and does nothing about quotes inside it, so  perl -e 'print "hi"'  comes
+  apart, and an empty argument vanishes.  Each argument is quoted here
+  instead, by the rules the C runtime splits with: backslashes are literal
+  except before a ", where each is doubled, and the " is escaped.
+  TProcess leaves an argument that already holds a " alone, so this reaches
+  the program as written.
+
+  Unix has argv, but TProcess builds it with StrNew, which gives nil for an
+  empty string, and that nil ends the list: perl a '' b sees only a.  When
+  there is an empty argument the command goes through the shell instead,
+  quoted for it, and exec hands the process straight to the program, so the
+  pipes, the exit code and the pid are all still the program's own. }
+{$ifdef MSWINDOWS}
+{ Whether Exe is a Perl program wrapped in a .bat by pl2bat, as perltidy,
+  perlcritic and perldoc are on Windows.  The .bat holds the whole script
+  and runs it with perl -x, which skips to the #! line; going through
+  cmd.exe to get there would have it read & and % in the arguments as its
+  own, so such a program is run with perl -x directly instead. }
+function IsPl2Bat(const Exe: AnsiString): Boolean;
+var
+  F: TextFile;
+  Line, Ext: AnsiString;
+begin
+  Result := False;
+  Ext := LowerCase(ExtractFileExt(Exe));
+  if (Ext <> '.bat') and (Ext <> '.cmd') then Exit;
+  AssignFile(F, Exe);
+  {$I-}
+  Reset(F);
+  if IOResult <> 0 then Exit;
+  ReadLn(F, Line);
+  CloseFile(F);
+  {$I+}
+  if IOResult <> 0 then Exit;
+  Result := Copy(Line, 1, 20) = '@rem = ''--*-Perl-*--';
+end;
+
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
+
+  procedure AddQuoted(const Arg: AnsiString);
+  var
+    Q: AnsiString;
+    i, Slashes: Integer;
+  begin
+    Q := '"';
+    Slashes := 0;
+    for i := 1 to Length(Arg) do
+      case Arg[i] of
+        '\': Inc(Slashes);
+        '"':
+          begin
+            Q := Q + StringOfChar('\', Slashes * 2 + 1) + '"';
+            Slashes := 0;
+          end;
+      else
+        Q := Q + StringOfChar('\', Slashes) + Arg[i];
+        Slashes := 0;
+      end;
+    Q := Q + StringOfChar('\', Slashes * 2) + '"';
+    P.Parameters.Add(Q);
+  end;
+
+var
+  Perl: AnsiString;
+  j: Integer;
+begin
+  Perl := '';
+  { The perl the .bat itself would have found. }
+  if IsPl2Bat(Exe) then Perl := FindOnPath('perl');
+  if Perl <> '' then
+  begin
+    P.Executable := Perl;
+    AddQuoted('-x');
+    AddQuoted(Exe);
+  end
+  else
+    P.Executable := Exe;
+  for j := Low(Args) to High(Args) do AddQuoted(Args[j]);
+end;
+{$else}
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
+
+  function ShQuote(const S: AnsiString): AnsiString;
+  begin
+    Result := '''' + StringReplace(S, '''', '''\''''', [rfReplaceAll]) + '''';
+  end;
+
+var
+  i: Integer;
+  HasEmpty: Boolean;
+  Line: AnsiString;
+begin
+  HasEmpty := False;
+  for i := Low(Args) to High(Args) do
+    if Args[i] = '' then HasEmpty := True;
+  { A program that cannot be found is left for TProcess to fail on, which
+    it reports better than the shell would. }
+  if HasEmpty and (FindOnPath(Exe) <> '') then
+  begin
+    Line := 'exec ' + ShQuote(Exe);
+    for i := Low(Args) to High(Args) do
+      Line := Line + ' ' + ShQuote(Args[i]);
+    P.Executable := '/bin/sh';
+    P.Parameters.Add('-c');
+    P.Parameters.Add(Line);
+  end
+  else
+  begin
+    P.Executable := Exe;
+    for i := Low(Args) to High(Args) do P.Parameters.Add(Args[i]);
+  end;
+end;
+{$endif}
 
 { Build a full environment block from the inherited one plus overrides. }
 procedure ApplyEnv(P: TProcess; const ExtraEnv: array of AnsiString);
@@ -190,8 +347,7 @@ begin
   P := TProcess.Create(nil);
   try
     try
-      P.Executable := Exe;
-      for i := Low(Args) to High(Args) do P.Parameters.Add(Args[i]);
+      SetCommand(P, Exe, Args);
       if WorkDir <> '' then P.CurrentDirectory := WorkDir;
       ApplyEnv(P, ExtraEnv);
       { No poUsePipes: the child gets the terminal the IDE just gave back. }
@@ -252,9 +408,7 @@ begin
   P := TProcess.Create(nil);
   try
     try
-      P.Executable := Exe;
-      for i := Low(Args) to High(Args) do
-        P.Parameters.Add(Args[i]);
+      SetCommand(P, Exe, Args);
       if WorkDir <> '' then P.CurrentDirectory := WorkDir;
       ApplyEnv(P, ExtraEnv);
       { Merging stderr into stdout keeps warnings and output in the order
