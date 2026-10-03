@@ -86,7 +86,7 @@ Then, from the source directory:
 
 ```
 perl build.pl              # builds turboperl.exe
-perl build.pl test         # headless unit tests
+perl build.pl test         # unit and interface tests
 perl build.pl install      # under %LOCALAPPDATA%\Programs\turboperl
 perl build.pl uninstall
 perl build.pl zip          # packages\turboperl-<version>-win64.zip
@@ -120,7 +120,7 @@ Settings are kept in `.turboperlrc` in your home directory: `%HOME%` if it is
 set, as it is under Git Bash, and otherwise `%USERPROFILE%`.
 
 `test` runs the unit tests, then the interface tests in
-`testsun-tests.pl`, which drive the IDE the way `run-tests.sh` does with
+`tests\run-tests.pl`, which drive the IDE the way `run-tests.sh` does with
 tmux, through [VisionDrive](https://github.com/turbo-perl/VisionDrive).  It
 looks for `visiondrive.exe` in `%VISIONDRIVE%`, on the `PATH`, then in a
 VisionDrive checkout beside this one, and skips the interface tests if it
