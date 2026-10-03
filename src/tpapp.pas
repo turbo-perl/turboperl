@@ -1002,6 +1002,12 @@ var
 begin
   Smcup := '';
   Rmcup := '';
+  {$IFDEF MSWINDOWS}
+  { The console has a screen buffer of the IDE's own instead (see TPWinCon),
+    and does not take the sequences a tput from Git or MSYS2 would hand
+    back: they would be printed over the IDE. }
+  Exit;
+  {$ENDIF}
   T := FindOnPath('tput');
   if T = '' then Exit;
 
