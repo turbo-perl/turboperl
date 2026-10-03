@@ -166,14 +166,26 @@ end;
 function TildePath(const Path, Home: AnsiString): AnsiString;
 var
   H: AnsiString;
+
+  { Windows takes / as well as \ and ignores case in file names. }
+  function Same(const A, B: AnsiString): Boolean;
+  begin
+    if FileNameCaseSensitive then
+      Result := SetDirSeparators(A) = SetDirSeparators(B)
+    else
+      Result := CompareText(SetDirSeparators(A), SetDirSeparators(B)) = 0;
+  end;
+
 begin
   Result := Path;
   H := ExcludeTrailingPathDelimiter(Home);
   { An empty $HOME, or one of /, would make ~ of everything. }
   if H = '' then Exit;
-  if Path = H then
+  if Same(Path, H) then
     Result := '~'
-  else if Copy(Path, 1, Length(H) + 1) = H + PathDelim then
+  else if (Length(Path) > Length(H)) and
+          (Path[Length(H) + 1] in AllowDirectorySeparators) and
+          Same(Copy(Path, 1, Length(H)), H) then
     Result := '~' + Copy(Path, Length(H) + 1, Length(Path));
 end;
 

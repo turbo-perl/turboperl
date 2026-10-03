@@ -103,6 +103,13 @@ begin
   Check('elsewhere is left alone', TildePath('/etc/x.pl', '/home/pat') = '/etc/x.pl');
   Check('a $HOME of / changes nothing', TildePath('/etc/x.pl', '/') = '/etc/x.pl');
   Check('no $HOME changes nothing', TildePath('/etc/x.pl', '') = '/etc/x.pl');
+{$ifdef MSWINDOWS}
+  Check('a Windows home', TildePath('C:\Users\pat\x.pl', 'C:\Users\pat') = '~\x.pl');
+  Check('a Windows home ignores case',
+        TildePath('c:\users\PAT\x.pl', 'C:\Users\pat') = '~\x.pl');
+  Check('a Windows home with / in the path',
+        TildePath('C:/Users/pat/x.pl', 'C:\Users\pat') = '~/x.pl');
+{$endif}
 
   WriteLn;
   if Fails = 0 then WriteLn('all settings tests passed')
