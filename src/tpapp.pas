@@ -14,6 +14,7 @@ uses
   Objects, Drivers, Views, Menus, App, MsgBox, StdDlg, Editors,
   FVConsts, Gadgets, Video,
   {$IFDEF UNIX} BaseUnix, TermIO, {$ENDIF}
+  {$IFDEF MSWINDOWS} TPWinCon, {$ENDIF}
   SysUtils, Classes,
   TPConst, TPConfig, TPPerl, TPEdit, TPViews, TPDlgs, TPText, TPDebug;
 
@@ -215,12 +216,23 @@ const
 var
   PaletteSet : Boolean = False;
 
+{ The Windows console prints OSC 4 rather than obeying it, so there the
+  console's own colour table is set instead, through its API. }
 procedure SetVgaPalette;
 var
   i: Integer;
   S: AnsiString;
+  {$IFDEF MSWINDOWS}
+  RGB: array[0..15] of LongWord;
+  {$ENDIF}
 begin
   if not Cfg.VgaPalette then Exit;
+  {$IFDEF MSWINDOWS}
+  for i := 0 to 15 do
+    RGB[i] := StrToInt('$' + Copy(VgaRGB[i], 1, 2) + Copy(VgaRGB[i], 4, 2) +
+                       Copy(VgaRGB[i], 7, 2));
+  PaletteSet := SetConsolePalette(RGB);
+  {$ELSE}
   if Copy(GetEnvironmentVariable('TERM'), 1, 5) = 'linux' then Exit;
   S := #27']4';
   for i := 0 to 15 do
@@ -228,13 +240,18 @@ begin
   Write(S, #7);
   Flush(Output);
   PaletteSet := True;
+  {$ENDIF}
 end;
 
 procedure RestorePalette;
 begin
   if not PaletteSet then Exit;
+  {$IFDEF MSWINDOWS}
+  RestoreConsolePalette;
+  {$ELSE}
   Write(#27']104'#7);
   Flush(Output);
+  {$ENDIF}
   PaletteSet := False;
 end;
 

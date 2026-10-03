@@ -262,6 +262,7 @@ perl saw an untouched environment.
 | `src/tptext.pas` | block comment/indent/strip and argument splitting, as pure functions |
 | `src/tpperl.pas` | running perl, capturing output, parsing its diagnostics |
 | `src/tpconfig.pas` | `~/.turboperlrc` |
+| `src/tpwincon.pas` | the Windows console API, where Unix gets escape sequences |
 | `src/tpedit.pas` | the editor view and its window |
 | `src/tpviews.pas` | the output, message and debugger windows |
 | `src/tpdebug.pas` | the debug session: talks to the bridge, holds breakpoints |
