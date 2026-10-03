@@ -66,12 +66,13 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl/Debug
 	install -m 644 lib/TurboPerl/Debug/Bridge.pm \
 	  $(DESTDIR)$(PREFIX)/share/turboperl/lib/TurboPerl/Debug/Bridge.pm
-	install -d $(DESTDIR)$(PREFIX)/share/turboperl/examples
-	install -m 644 examples/* $(DESTDIR)$(PREFIX)/share/turboperl/examples/
+	install -d $(DESTDIR)$(PREFIX)/share/doc/turboperl/examples
+	install -m 644 examples/* $(DESTDIR)$(PREFIX)/share/doc/turboperl/examples/
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -rf $(DESTDIR)$(PREFIX)/share/turboperl
+	rm -rf $(DESTDIR)$(PREFIX)/share/doc/turboperl
 
 # The version is the IDE's own, so the package can never disagree with what
 # turboperl --version says.  The binary is linked statically and needs only
@@ -85,7 +86,8 @@ DEB       := $(PKGDIR)/$(TARGET)_$(VERSION)_$(DEBARCH).deb
 
 deb: $(DEB)
 
-$(DEB): $(TARGET) lib/TurboPerl/Unbuffer.pm lib/TurboPerl/Debug/Bridge.pm
+$(DEB): $(TARGET) lib/TurboPerl/Unbuffer.pm lib/TurboPerl/Debug/Bridge.pm \
+        $(wildcard examples/*) README.md Makefile
 	rm -rf $(DEBROOT)
 	mkdir -p $(PKGDIR)
 	$(MAKE) install DESTDIR=$(CURDIR)/$(DEBROOT) PREFIX=/usr
