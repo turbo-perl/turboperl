@@ -33,7 +33,13 @@ of a 1992 Borland IDE pointed at a modern perl.
 ## Building on Unix
 
 Needs Free Pascal with the Free Vision units (`fp-units-fv` on Debian and
-Ubuntu, `fpc-src`/`fpc` elsewhere) and a perl to point it at.
+Ubuntu, `fpc-src`/`fpc` elsewhere) and a perl to point it at.  The Perl
+modules the IDE uses, Devel::ebug for the debugger among them, are listed
+in `cpanfile`:
+
+```sh
+cpanm --installdeps .
+```
 
 ```sh
 make            # builds ./turboperl
@@ -81,6 +87,14 @@ GNU `make`, `gdb`, and Unix-style `rm`, `cp`, `mv`, `grep` and `diff`.  Those
 can shadow your own tools and break building XS modules for perl.  Take the
 entry back out (System Properties → Environment Variables).  `fpc.exe` runs
 fine from where it is, and `build.pl` finds it on its own.
+
+The Perl modules the IDE uses, Devel::ebug for the debugger among them,
+are listed in `cpanfile`; `--with-develop` adds what `build.pl` needs to
+build the zip:
+
+```
+cpanm --installdeps --with-develop .
+```
 
 Then, from the source directory:
 

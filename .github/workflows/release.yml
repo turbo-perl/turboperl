@@ -121,6 +121,10 @@ jobs:
       - name: Install Free Pascal
         uses: ./.github/actions/install-fpc-windows
 
+      # cpanfile's develop modules are what build.pl needs for the zip.
+      - name: Install Perl modules
+        run: cpanm --notest --quiet --installdeps --with-develop .
+
       - name: Build the zip
         run: perl build.pl zip
 

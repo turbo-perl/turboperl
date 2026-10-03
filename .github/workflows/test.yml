@@ -26,11 +26,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             fpc fp-units-fv tmux perl perl-doc cpanminus
 
-      # The integrated debugger drives Devel::ebug, which is not packaged
-      # for Ubuntu.  --notest because its own suite wants Expect and a
-      # terminal, which is not what is being tested here.
-      - name: Install Devel::ebug
-        run: sudo cpanm --notest --quiet Devel::ebug
+      # The modules in cpanfile: Devel::ebug, for the integrated debugger,
+      # is not packaged for Ubuntu.  --notest because its own suite wants
+      # Expect and a terminal, which is not what is being tested here.
+      - name: Install Perl modules
+        run: sudo cpanm --notest --quiet --installdeps .
 
       - name: Versions
         run: |
@@ -60,10 +60,10 @@ jobs:
       - name: Install Free Pascal
         uses: ./.github/actions/install-fpc-windows
 
-      # The integrated debugger drives Devel::ebug.  --notest, as on Linux:
-      # its own suite is not what is being tested here.
-      - name: Install Devel::ebug
-        run: cpanm --notest --quiet Devel::ebug
+      # The modules in cpanfile.  --notest, as on Linux: their own suites
+      # are not what is being tested here.
+      - name: Install Perl modules
+        run: cpanm --notest --quiet --installdeps .
 
       - name: Versions
         run: |
