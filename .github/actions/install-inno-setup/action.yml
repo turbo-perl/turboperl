@@ -1,0 +1,26 @@
+name: Install Inno Setup
+description: >
+  Makes sure Inno Setup's compiler is there for perl build.pl installer,
+  installing it with Chocolatey if the runner does not already have it,
+  and points ISCC at it.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Inno Setup
+      shell: pwsh
+      run: |
+        function Find-Iscc {
+          Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe",
+                        "$env:ProgramFiles\Inno Setup*\ISCC.exe",
+                        "$env:LOCALAPPDATA\Programs\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        }
+        $iscc = Find-Iscc
+        if (-not $iscc) {
+          choco install innosetup -y --no-progress
+          $iscc = Find-Iscc
+        }
+        if (-not $iscc) { throw "Inno Setup (ISCC.exe) not found" }
+        Write-Output "Inno Setup: $iscc"
+        "ISCC=$iscc" >> $env:GITHUB_ENV
