@@ -30,7 +30,7 @@ of a 1992 Borland IDE pointed at a modern perl.
 - The usual editor: multiple windows, find and replace, undo, clipboard,
   block comment/indent, go to line.
 
-## Building
+## Building on Unix
 
 Needs Free Pascal with the Free Vision units (`fp-units-fv` on Debian and
 Ubuntu, `fpc-src`/`fpc` elsewhere) and a perl to point it at.
@@ -59,6 +59,60 @@ If Free Vision lives somewhere unusual, point the build at it:
 ```sh
 make FVUNITS=/path/to/fpc/units/x86_64-linux/fv
 ```
+
+## Building on Windows
+
+Windows builds use `build.pl` instead of the Makefile, so there is no need for
+`make`, `nmake` or a Unix shell.  It needs only core modules, so any native
+Windows perl will run it: Strawberry, a Visual C build, ActiveState.  (Not
+the Cygwin perl that comes with Git Bash: that is a Unix perl, and `build.pl`
+won't run under it.)
+
+Install Free Pascal, which comes with Free Vision:
+
+```
+winget install FreePascal.FreePascalCompiler
+```
+
+**Keep FPC's directory off your `PATH`.**  The installer adds
+`C:\FPC\<version>\bin\i386-Win32` to the system `PATH`, and that directory
+holds a lot more than the compiler: an old 32-bit `gcc`, `ld`, `as` and `ar`,
+GNU `make`, `gdb`, and Unix-style `rm`, `cp`, `mv`, `grep` and `diff`.  Those
+can shadow your own tools and break building XS modules for perl.  Take the
+entry back out (System Properties → Environment Variables).  `fpc.exe` runs
+fine from where it is, and `build.pl` finds it on its own.
+
+Then, from the source directory:
+
+```
+perl build.pl              # builds turboperl.exe
+perl build.pl test         # headless unit tests
+perl build.pl install      # under %LOCALAPPDATA%\Programs\turboperl
+perl build.pl uninstall
+perl build.pl clean
+```
+
+`build.pl` looks for the compiler in this order: `--fpc PATH`, then `%FPC%`,
+then `PATH`, then the newest `C:\FPC\<version>\bin\i386-win32\fpc.exe`.  It
+builds a 64-bit program by default, using the x86_64 cross compiler that comes
+with FPC; pass `--cpu i386` for a 32-bit one.  Free Vision needs no extra
+setting: the `fpc.cfg` written by the installer already searches FPC's units
+directory.
+
+`install` puts everything in one directory, `--prefix DIR`, which defaults to
+`%LOCALAPPDATA%\Programs\turboperl`:
+
+```
+turboperl.exe
+lib\TurboPerl\Unbuffer.pm
+lib\TurboPerl\Debug\Bridge.pm
+examples\
+```
+
+Add that directory to your `PATH` to run `turboperl` from anywhere.
+
+`test` runs the unit tests, but not the scripted interface tests: those
+drive the IDE through tmux, which Windows doesn't have.
 
 ## Running
 
