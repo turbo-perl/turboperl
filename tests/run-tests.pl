@@ -19,7 +19,7 @@ use File::Copy qw( copy );
 use File::Path qw( mkpath );
 use File::Spec;
 use File::Temp qw( tempdir );
-use Time::HiRes qw( sleep );
+use Time::HiRes qw( sleep time );
 
 my $verbose = @ARGV && $ARGV[0] eq '-v';
 my $top     = File::Spec->rel2abs(File::Spec->catdir(dirname(__FILE__), '..'));
@@ -79,6 +79,25 @@ sub waitfor {
 sub gone {
   my ($text, $ms) = @_;
   system($vd, 'wait', $session, $text, '--gone', '--timeout', $ms || 10000) == 0;
+}
+
+# wait until TEST, given the screen, is true; for what wait cannot say.  With
+# COLOUR the screen comes with its colours, as from screen_colour.
+sub poll {
+  my ($test, $ms, $colour) = @_;
+  my $until = time + ($ms || 10000) / 1000;
+  my $e = $colour ? ' -e' : '';
+  while (time < $until) {
+    return 1 if $test->(scalar `"$vd" screen $session$e`);
+    sleep 0.1;
+  }
+  0;
+}
+
+# wait until the debugger marks the line holding TEXT as the one it is on
+sub stopped_at {
+  my ($text) = @_;
+  poll(sub { $_[0] =~ /\e\[30m\e\[46m[^\n]*\Q$text\E/ }, 10000, 1);
 }
 
 sub screen {
@@ -343,7 +362,8 @@ waitfor('press Enter to return');
 press('Enter');
 waitfor('F9 Check');
 press('M-r', 'c');
-waitfor('press Enter to return');
+# Not the prompt: the first run's is still on the console.
+poll(sub { my $n = () = $_[0] =~ /MARKER/g; $n >= 2 });
 $s = screen();
 my $count = () = $s =~ /MARKER/g;
 ok("a second console run appends below the first (found $count of 2)", $count >= 2);
@@ -364,12 +384,14 @@ press('Down', 'Down', 'Down', 'C-F8');
 sleep 1;
 check('a break point line turns red', screen_colour(), "\e[41m");
 press('C-F9');
-waitfor('6:1');
+# Not waiting for 6:1, which the cursor already was on to set the break
+# point: for the marker to move there.
+stopped_at('$total += $n');
 check('continue stops at the break point', screen(), '6:1');
 
 # the debugger panes
 press('M-d', 'v');
-waitfor('$n = 1', 3000);
+waitfor('$n = 1');
 $s = screen();
 check('the variables pane lists lexicals', $s, '$n = 1');
 check('and the outer lexical too',         $s, '$total = 0');
@@ -390,9 +412,11 @@ waitfor('3:1');
 press('Down', 'C-F8');
 sleep 1;
 press('C-F9');
-waitfor('4:1');
+# Not 4:1, which the cursor already was on to set the break point, nor
+# $deep, which the source says too: the marker, then the pane's own line.
+stopped_at('print "ok');
 press('M-d', 'v');
-waitfor('$deep', 3000);
+waitfor('+ $deep = {');
 check_re('a long variable is cut to one line', screen(), qr/\+ \$deep = \{list => \[1, 2, .*\.\.\./);
 press('Right');
 waitfor('- $deep', 3000);
