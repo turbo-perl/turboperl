@@ -2,12 +2,21 @@
 #
 #   make            build the IDE
 #   make test       build and run the headless unit tests
-#   make install    install under $(PREFIX), default /usr/local
+#   make install    install under $(PREFIX): /usr/local as root, else ~/.local
 #   make deb        build a Debian package that installs under /usr
 #   make clean      remove build products
 
 FPC       ?= fpc
+# root installs for everyone; anyone else installs for themselves, into
+# ~/.local.  A staged install (DESTDIR set) is building something for root
+# to install later, so it keeps the system location whoever runs it.
+ifneq ($(DESTDIR),)
 PREFIX    ?= /usr/local
+else ifeq ($(shell id -u),0)
+PREFIX    ?= /usr/local
+else
+PREFIX    ?= $(HOME)/.local
+endif
 FVUNITS   ?= $(shell $(FPC) -iV >/dev/null 2>&1 && \
                d=$$(dirname $$(realpath $$($(FPC) -PB))) && \
                echo $$d/units/$$($(FPC) -iTP)-$$($(FPC) -iTO)/fv)

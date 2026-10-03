@@ -39,11 +39,15 @@ Ubuntu, `fpc-src`/`fpc` elsewhere) and a perl to point it at.
 make            # builds ./turboperl
 make test       # headless unit tests plus scripted interface tests
 make corpus     # runs the highlighter over every Perl file it can find
-sudo make install
+make install    # just for you, under ~/.local
+sudo make install   # for everyone, under /usr/local
 ```
 
 `make install` puts the binary in `$(PREFIX)/bin` and the helper library in
-`$(PREFIX)/share/turboperl/lib`; `PREFIX` defaults to `/usr/local`.
+`$(PREFIX)/share/turboperl/lib`.  `PREFIX` defaults to `/usr/local` when run
+as root, as with `sudo make install`, and to `~/.local` otherwise, so a plain
+`make install` installs for you alone with no root needed; make sure
+`~/.local/bin` is on your `PATH`.  Set `PREFIX` to install anywhere else.
 
 `make deb` builds `packages/turboperl_<version>_<arch>.deb`, which installs
 under `/usr` instead.  Each release on GitHub has one attached: merging a pull
