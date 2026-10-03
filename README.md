@@ -90,6 +90,7 @@ perl build.pl test         # unit and interface tests
 perl build.pl install      # under %LOCALAPPDATA%\Programs\turboperl
 perl build.pl uninstall
 perl build.pl zip          # packages\turboperl-<version>-win64.zip
+perl build.pl installer    # packages\turboperl-<version>-setup.exe
 perl build.pl clean
 ```
 
@@ -115,6 +116,14 @@ Add that directory to your `PATH` to run `turboperl` from anywhere.
 `zip` builds the same layout into `packages\turboperl-<version>-win64.zip`,
 inside a folder of the same name, with the README and licence; unzipped
 anywhere, it runs from there.  Each release on GitHub has one attached.
+
+`installer` builds `packages\turboperl-<version>-setup.exe` with
+[Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install
+JRSoftware.InnoSetup`), from `turboperl.iss`.  It installs the same files
+for you alone, with no administrator needed, or for everyone; adds a Start
+menu entry, which starts in your Documents folder; and, unless told not to,
+puts TurboPerl on your `PATH`, which uninstalling takes off again.  Each
+release has one of these attached too.
 
 Settings are kept in `.turboperlrc` in your home directory: `%HOME%` if it is
 set, as it is under Git Bash, and otherwise `%USERPROFILE%`.

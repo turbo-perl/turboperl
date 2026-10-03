@@ -6,6 +6,7 @@
 #   perl build.pl install      install under --prefix
 #   perl build.pl uninstall    remove what install put there
 #   perl build.pl zip          packages\turboperl-<version>-win64.zip
+#   perl build.pl installer    packages\turboperl-<version>-setup.exe
 #   perl build.pl clean        remove build products
 #
 # Windows has no make we can count on: nmake comes with Visual C, GNU make
@@ -47,6 +48,7 @@ my %action = (
   install   => \&install,
   uninstall => \&uninstall,
   zip       => \&zip,
+  installer => \&installer,
   clean     => \&clean,
 );
 my @todo = @ARGV ? @ARGV : ('all');
@@ -55,7 +57,7 @@ $action{$_}->() for @todo;
 
 sub usage {
   print "usage: perl build.pl [--fpc PATH] [--cpu x86_64|i386] [--prefix DIR]\n",
-        "                     [all|test|install|uninstall|zip|clean]...\n";
+        "                     [all|test|install|uninstall|zip|installer|clean]...\n";
   exit shift;
 }
 
@@ -200,6 +202,42 @@ sub zip {
     or die "cannot write $zip: $IO::Compress::Zip::ZipError\n";
   rmtree($stage);
   print "wrote $zip\n";
+}
+
+# Inno Setup's compiler: $ISCC, the PATH, then where its installer puts it,
+# for everyone or (as winget does) for the user alone.
+sub iscc {
+  return $ENV{ISCC} if $ENV{ISCC} && -x $ENV{ISCC};
+  for my $dir (File::Spec->path) {
+    my $f = File::Spec->catfile($dir, 'ISCC.exe');
+    return $f if -x $f;
+  }
+  require File::Glob;
+  for my $base (grep { defined } @ENV{qw( ProgramFiles(x86) ProgramFiles LOCALAPPDATA )}) {
+    # bsd_glob, since glob would split "Inno Setup*" at the space
+    my @found = File::Glob::bsd_glob(File::Spec->catfile($base,
+      $base eq ($ENV{LOCALAPPDATA} // '') ? 'Programs' : (), 'Inno Setup*', 'ISCC.exe'));
+    return $found[-1] if @found && -x $found[-1];
+  }
+  die "cannot find Inno Setup's ISCC.exe; install it (winget install JRSoftware.InnoSetup) or set ISCC\n";
+}
+
+# packages\turboperl-<version>-setup.exe, from turboperl.iss: the zip's
+# files, installed for the user alone or for everyone, with a Start menu
+# entry and, if asked, the PATH.
+sub installer {
+  build();
+  my $iscc  = iscc();
+  my $stage = File::Spec->rel2abs(File::Spec->catdir('packages', 'setup-stage'));
+  rmtree($stage);
+  stage($stage);
+  inst($_, $stage) for 'README.md', 'LICENSE';
+  my @cmd = ($iscc, '/Q', '/DAppVersion=' . version(), "/DStage=$stage", 'turboperl.iss');
+  print "@cmd\n";
+  my $ok = system(@cmd) == 0;
+  rmtree($stage);
+  die "Inno Setup failed\n" unless $ok;
+  print 'wrote ', File::Spec->catfile('packages', 'turboperl-' . version() . '-setup.exe'), "\n";
 }
 
 sub inst {
