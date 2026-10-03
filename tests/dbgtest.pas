@@ -2,7 +2,7 @@
   real debuggee, with no user interface involved. }
 program DbgTest;
 {$mode objfpc}{$H+}
-uses SysUtils, TPConst, TPConfig, TPPerl, TPDebug;
+uses SysUtils, Classes, TPConst, TPConfig, TPPerl, TPDebug;
 
 var Fails: Integer = 0;
 
@@ -39,6 +39,8 @@ var
   Out_: AnsiString;
   i: Integer;
   Frame: TStackFrame;
+  OldLib: AnsiString;
+  Src: TStringList;
 begin
   LoadConfig;
   Cfg.LibDir := ExpandFileName('lib');
@@ -56,6 +58,8 @@ begin
     Halt(1);
   end;
   Check('session started', S.State = dsStopped, IntToStr(Ord(S.State)));
+  Out_ := S.TakeWarning;
+  Check('a matching bridge raises no warning', Out_ = '', Out_);
 
   S.Go;
   Check('run reached the breakpoint', Settle(S, 20000) and (S.CurLine = 9),
@@ -146,6 +150,31 @@ begin
   Check('a watch can still ask for the count',
         (S.WatchVals.Count = 2) and (S.WatchVals[1] = '4'), S.WatchVals.Text);
   S.Free;
+
+  { A bridge from some other release is still used, but with a warning. }
+  OldLib := ExpandFileName(GetTempDir + 'dbgtest-lib-' + IntToStr(GetProcessID));
+  ForceDirectories(OldLib + '/TurboPerl/Debug');
+  Src := TStringList.Create;
+  Src.LoadFromFile('lib/TurboPerl/Debug/Bridge.pm');
+  for i := 0 to Src.Count - 1 do
+    if Pos('our $VERSION', Src[i]) = 1 then Src[i] := 'our $VERSION = ''0.00'';';
+  Src.SaveToFile(OldLib + '/TurboPerl/Debug/Bridge.pm');
+  Src.Free;
+  Cfg.LibDir := OldLib;
+  S := TDebugSession.Create;
+  Check('an old bridge still starts', S.Start(Script, ''), S.Error);
+  Out_ := S.TakeWarning;
+  Check('an old bridge raises a warning',
+        Pos('the debugger bridge is version 0.00 but the IDE is ' + TPVersion,
+            Out_) = 1, Out_);
+  Check('the warning names where it looked', Pos(OldLib, Out_) > 0, Out_);
+  Check('and is only given once', S.TakeWarning = '');
+  S.Free;
+  DeleteFile(OldLib + '/TurboPerl/Debug/Bridge.pm');
+  RemoveDir(OldLib + '/TurboPerl/Debug');
+  RemoveDir(OldLib + '/TurboPerl');
+  RemoveDir(OldLib);
+  Cfg.LibDir := ExpandFileName('lib');
 
   WriteLn;
   if Fails = 0 then WriteLn('all debugger tests passed')

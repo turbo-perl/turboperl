@@ -93,6 +93,7 @@ type
     procedure ShowUserScreen;
 
     procedure Complain(const S: AnsiString);
+    procedure Caution(const S: AnsiString);
     function  NextWindowNumber: Integer;
   end;
 
@@ -655,6 +656,17 @@ var
 begin
   T := Copy(S, 1, 250);
   MessageBox(T, nil, mfError or mfOKButton);
+end;
+
+{ As Complain, for something the user should know about that has not
+  stopped anything.  Nothing to say, nothing shown. }
+procedure TTurboPerl.Caution(const S: AnsiString);
+var
+  T: String;
+begin
+  if S = '' then Exit;
+  T := Copy(S, 1, 250);
+  MessageBox(T, nil, mfWarning or mfOKButton);
 end;
 
 { The editor to act on: the focused one, else the topmost edit window. }
@@ -1334,6 +1346,8 @@ begin
   if Session = nil then Session := TDebugSession.Create;
   if not Session.Start(Script, Cfg.ScriptArgs) then
   begin
+    { A mismatched bridge may be the very reason it failed, so say so first. }
+    Caution(Session.TakeWarning);
     Complain(Session.Error);
     Exit;
   end;
@@ -1885,6 +1899,10 @@ begin
         MessageBox('The program has finished.', nil,
                    mfInformation or mfOKButton);
       end;
+
+      { Only once the stop is on screen: a box put up any earlier would be
+        buried by the editor window coming to the front. }
+      Caution(Session.TakeWarning);
 
       if Session.Error <> '' then
       begin

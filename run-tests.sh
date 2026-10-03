@@ -33,12 +33,12 @@ start() {
     # FORCETERM runs the IDE under a different terminal description; tmux
     # still renders the result, which is what lets the alternate-screen
     # handling be exercised for more than one style of terminal.
-    if [ -n "${FORCETERM:-}" ]; then
-        tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" \
-             "TERM=$FORCETERM $IDE $*"
-    else
-        tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" "$IDE $*"
-    fi
+    # TESTHOME gives the IDE a home directory, and so a settings file, of
+    # the test's own.
+    ENV=
+    [ -n "${FORCETERM:-}" ] && ENV="$ENV TERM=$FORCETERM"
+    [ -n "${TESTHOME:-}" ]  && ENV="$ENV HOME=$TESTHOME"
+    tmux new-session -d -s "$SESSION" -x "${COLS:-100}" -y "${ROWS:-30}" "$ENV $IDE $*"
     sleep 2
 }
 
@@ -425,6 +425,23 @@ keys Left Left Left
 S=$(screen)
 check "Left goes back up and closes"     "$S" "+ \$deep = {list"
 check_not "leaving the elements hidden"  "$S" "{name}"
+DELAY=3 rawkeys $CTRL_F2
+stop
+
+# a bridge from another release still works, but the IDE says so
+mkdir -p "$TMPDIR_T/home" "$TMPDIR_T/oldlib"
+cp -r lib/TurboPerl "$TMPDIR_T/oldlib/"
+sed "s/^our \$VERSION = .*/our \$VERSION = '0.00';/" lib/TurboPerl/Debug/Bridge.pm \
+    > "$TMPDIR_T/oldlib/TurboPerl/Debug/Bridge.pm"
+echo "libdir = $TMPDIR_T/oldlib" > "$TMPDIR_T/home/.turboperlrc"
+TESTHOME="$TMPDIR_T/home" start "$TMPDIR_T/dbg.pl"
+DELAY=6 rawkeys $F7
+S=$(screen)
+check "a mismatched bridge raises a warning" "$S" "the debugger bridge is version 0.00"
+DELAY=1.5 keys Enter
+S=$(screen)
+check_not "Enter dismisses it"               "$S" "Warning"
+check "and the session carries on"           "$S" "3:1"
 DELAY=3 rawkeys $CTRL_F2
 stop
 
