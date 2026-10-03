@@ -21,12 +21,36 @@ var
 begin
   Perl := FindOnPath('perl');
   WriteLn('perl found at: ', Perl);
+  { The rest only prints, for reading; without a perl it would print
+    nothing useful and still pass. }
+  if Perl = '' then
+  begin
+    WriteLn('FAIL no perl on the PATH');
+    Halt(1);
+  end;
 
   R := RunCaptured(Perl, ['-e', 'print "hello from perl\n"; warn "a warning\n"; exit 3'],
                    '', '', 5000);
   WriteLn(Format('launched=%s exit=%d timedout=%s', [BoolToStr(R.Launched, True),
           R.ExitCode, BoolToStr(R.TimedOut, True)]));
+  if not R.Launched then
+  begin
+    WriteLn('FAIL perl did not start: ', R.ErrMsg);
+    Halt(1);
+  end;
   Write('output: ', R.Output);
+
+  { Windows passes a command line, not a list, so quotes, backslashes and
+    empty arguments all have to survive being joined up and split again. }
+  R := RunCaptured(Perl, ['-e', 'print join(q{|}, map { "[$_]" } @ARGV)',
+                          'has space', 'say "hi"', '', 'back\slash\', 'a\"b', 'last'],
+                   '', '', 5000);
+  WriteLn('arguments: ', R.Output);
+  if R.Output <> '[has space]|[say "hi"]|[]|[back\slash\]|[a\"b]|[last]' then
+  begin
+    WriteLn('FAIL arguments did not arrive as given');
+    Halt(1);
+  end;
 
   R := RunCaptured(Perl, ['-e', 'print scalar <STDIN>'], '', 'fed via stdin'#10, 5000);
   WriteLn('stdin round trip: ', TrimRight(R.Output));

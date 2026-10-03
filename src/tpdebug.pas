@@ -24,7 +24,7 @@ interface
 uses
   SysUtils, Classes, Process, fpjson, jsonparser,
   {$IFDEF UNIX} BaseUnix, {$ENDIF}
-  TPConst, TPConfig, TPText;
+  TPConst, TPConfig, TPText, TPPerl;
 
 type
   TDebugState = (
@@ -345,10 +345,10 @@ begin
 
   FProc := TProcess.Create(nil);
   FProc.Executable := Cfg.PerlExe;
-  FProc.Parameters.Add('-I' + LibDir);
-  FProc.Parameters.Add('-MTurboPerl::Debug::Bridge');
-  FProc.Parameters.Add('-e');
-  FProc.Parameters.Add('TurboPerl::Debug::Bridge::run()');
+  AddArg(FProc, '-I' + LibDir);
+  AddArg(FProc, '-MTurboPerl::Debug::Bridge');
+  AddArg(FProc, '-e');
+  AddArg(FProc, 'TurboPerl::Debug::Bridge::run()');
   FProc.CurrentDirectory := ExtractFilePath(ExpandFileName(Script));
   FProc.Options := [poUsePipes];
   try
