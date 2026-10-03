@@ -5,6 +5,7 @@
 #   perl build.pl test         build and run the headless unit tests
 #   perl build.pl install      install under --prefix
 #   perl build.pl uninstall    remove what install put there
+#   perl build.pl zip          packages\turboperl-<version>-win64.zip
 #   perl build.pl clean        remove build products
 #
 # Windows has no make we can count on: nmake comes with Visual C, GNU make
@@ -45,6 +46,7 @@ my %action = (
   test      => \&test,
   install   => \&install,
   uninstall => \&uninstall,
+  zip       => \&zip,
   clean     => \&clean,
 );
 my @todo = @ARGV ? @ARGV : ('all');
@@ -53,7 +55,7 @@ $action{$_}->() for @todo;
 
 sub usage {
   print "usage: perl build.pl [--fpc PATH] [--cpu x86_64|i386] [--prefix DIR]\n",
-        "                     [all|test|install|uninstall|clean]...\n";
+        "                     [all|test|install|uninstall|zip|clean]...\n";
   exit shift;
 }
 
@@ -150,7 +152,13 @@ sub test {
 #   <prefix>\examples\...
 sub install {
   build() unless -f $target;
-  my $p = $opt{prefix};
+  stage($opt{prefix});
+  print "installed under $opt{prefix}; add it to your PATH to run turboperl from anywhere\n";
+}
+
+# Lay the IDE out in Dir, as DetectLibDir looks for it beside the binary.
+sub stage {
+  my ($p) = @_;
   for my $d ('', 'lib/TurboPerl/Debug', 'examples') {
     my $dir = File::Spec->catdir($p, split m{/}, $d);
     mkpath($dir) unless -d $dir;
@@ -159,7 +167,39 @@ sub install {
   inst('lib/TurboPerl/Unbuffer.pm',     File::Spec->catdir($p, 'lib', 'TurboPerl'));
   inst('lib/TurboPerl/Debug/Bridge.pm', File::Spec->catdir($p, 'lib', 'TurboPerl', 'Debug'));
   inst($_, File::Spec->catdir($p, 'examples')) for grep { -f } glob 'examples/*';
-  print "installed under $p; add it to your PATH to run turboperl from anywhere\n";
+}
+
+# The version is the IDE's own, as for the Debian package, so the zip can
+# never disagree with what turboperl --version says.
+sub version {
+  open my $fh, '<', 'src/tpconst.pas' or die "cannot read src/tpconst.pas: $!\n";
+  while (<$fh>) {
+    return $1 if /^\s*TPVersion\s*=\s*'([^']*)'/;
+  }
+  die "no TPVersion in src/tpconst.pas\n";
+}
+
+# The install layout, with the README and licence, in a folder of its own
+# inside the zip: unzipped anywhere, it runs from there.
+sub zip {
+  require IO::Compress::Zip;
+  require File::Find;
+  build();
+  my $arch  = $opt{cpu} eq 'i386' ? 'win32' : 'win64';
+  my $name  = 'turboperl-' . version() . "-$arch";
+  my $stage = File::Spec->catdir('packages', $name);
+  my $zip   = "$stage.zip";
+  rmtree($stage);
+  unlink $zip;
+  stage($stage);
+  inst($_, $stage) for 'README.md', 'LICENSE';
+  my @files;
+  File::Find::find(sub { push @files, $File::Find::name if -f }, $stage);
+  IO::Compress::Zip::zip([ sort @files ] => $zip,
+    FilterName => sub { s{\\}{/}g; s{^packages/}{} })
+    or die "cannot write $zip: $IO::Compress::Zip::ZipError\n";
+  rmtree($stage);
+  print "wrote $zip\n";
 }
 
 sub inst {
@@ -178,6 +218,7 @@ sub uninstall {
 
 sub clean {
   rmtree($unitdir);
+  rmtree('packages');
   unlink $target, @tests, glob('src/*.o'), glob('src/*.ppu'),
          glob('tests/*.o'), glob('tests/*.ppu');
 }

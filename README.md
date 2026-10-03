@@ -89,6 +89,7 @@ perl build.pl              # builds turboperl.exe
 perl build.pl test         # headless unit tests
 perl build.pl install      # under %LOCALAPPDATA%\Programs\turboperl
 perl build.pl uninstall
+perl build.pl zip          # packages	urboperl-<version>-win64.zip
 perl build.pl clean
 ```
 
@@ -110,6 +111,10 @@ examples\
 ```
 
 Add that directory to your `PATH` to run `turboperl` from anywhere.
+
+`zip` builds the same layout into `packages	urboperl-<version>-win64.zip`,
+inside a folder of the same name, with the README and licence; unzipped
+anywhere, it runs from there.  Each release on GitHub has one attached.
 
 Settings are kept in `.turboperlrc` in your home directory: `%HOME%` if it is
 set, as it is under Git Bash, and otherwise `%USERPROFILE%`.
