@@ -57,31 +57,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The same installer winget uses, fetched from SourceForge, which is
-      # slow and sometimes flaky, so it is kept between runs.
-      - name: Cache the Free Pascal installer
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}\fpc-installer
-          key: fpc-3.2.2-win32-and-win64
-
-      # Installed where a user's winget install puts it.  build.pl finds it
-      # there by itself; FPC's bin directory is deliberately not on the PATH.
+      # Installed where a user's winget install puts it, and left off the
+      # PATH, so build.pl finding it is tested too.
       - name: Install Free Pascal
-        env:
-          FPC_INSTALLER: ${{ runner.temp }}\fpc-installer\fpc-3.2.2.win32.and.win64.exe
-        run: |
-          if (-not (Test-Path $env:FPC_INSTALLER)) {
-            New-Item -ItemType Directory -Force (Split-Path $env:FPC_INSTALLER) | Out-Null
-            curl.exe -fsSL --retry 3 -o $env:FPC_INSTALLER `
-              https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download
-          }
-          $hash = (Get-FileHash $env:FPC_INSTALLER -Algorithm SHA256).Hash
-          if ($hash -ne '8C255390544B051388B577EB61C6191A04883264AFE0E3369B3600A56DAF7BDE') {
-            throw "unexpected installer hash $hash"
-          }
-          Start-Process -Wait -FilePath $env:FPC_INSTALLER `
-            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=C:\FPC\3.2.2'
+        uses: ./.github/actions/install-fpc-windows
 
       # Whether Devel::ebug installs on Windows at all is one of the things
       # to find out, so a failure here should not stop the build and tests.
