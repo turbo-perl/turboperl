@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  build:
     # Releases are built for both, so both are tested.
     strategy:
       fail-fast: false
@@ -44,3 +44,19 @@ jobs:
 
       - name: Test
         run: make test
+
+  # Branch protection requires a check called "test".  The matrix jobs are
+  # named after their runners, so this one stands for all of them, and
+  # runners can come and go without the protection rule changing.  It must
+  # run even when a build fails: a skipped required check counts as passed.
+  test:
+    needs: build
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every build passed
+        env:
+          RESULT: ${{ needs.build.result }}
+        run: |
+          echo "builds: $RESULT"
+          test "$RESULT" = success
