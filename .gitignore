@@ -1,6 +1,8 @@
 # Build output
 /units/
 /turboperl
+/debian-root/
+/turboperl_*.deb
 
 # Compiled test programs; their sources are tracked
 /tests/cfgtest

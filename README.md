@@ -45,6 +45,11 @@ sudo make install
 `make install` puts the binary in `$(PREFIX)/bin` and the helper library in
 `$(PREFIX)/share/turboperl/lib`; `PREFIX` defaults to `/usr/local`.
 
+`make deb` builds `turboperl_<version>_<arch>.deb`, which installs under
+`/usr` instead.  Each release on GitHub has one attached: merging a pull
+request that changes `TPVersion` in `src/tpconst.pas` tags the merge commit
+`v<version>` and publishes the package with it.
+
 If Free Vision lives somewhere unusual, point the build at it:
 
 ```sh
