@@ -280,5 +280,9 @@ rather than a division, which gets `split /,/` right at the cost of
 
 ## Licence
 
-Public domain / CC0. Free Vision and Free Pascal are under their own
-licences.
+Copyright (c) 2026 Graham Ollis.  This is free software; you can
+redistribute it and/or modify it under the same terms as the Perl 5
+programming language system itself: the GNU General Public License,
+version 1 or later, or the Artistic License.  See `LICENSE`.
+
+Free Vision and Free Pascal are under their own licences.
