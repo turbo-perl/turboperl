@@ -1,51 +1,50 @@
 name: release
 
-# A merged pull request that changes TPVersion is a release: the merge
-# commit is tagged v<version>, and .deb packages built from it for amd64 and
-# arm64 are attached to the GitHub release of that tag.  Merges that leave
-# the version alone do nothing.
+# A push to main that changes TPVersion is a release: the commit pushed,
+# normally the merge commit of a pull request, is tagged v<version>, and .deb
+# packages built from it for amd64 and arm64 are attached to the GitHub
+# release of that tag.  Pushes that leave the version alone do nothing.
+#
+# It runs on the push rather than on the pull request closing so that the
+# run belongs to the commit that gets tagged, and shows up beside its tests.
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
 
 permissions:
   contents: read
 
-# Two merges in quick succession must not race each other to the tag.
+# Two pushes in quick succession must not race each other to the tag.
 concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-
 jobs:
   version:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.version.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      # Depth 2 brings in the merge commit's parents, the first of which is
-      # main as it was before the merge.
+      # The whole history, so that main as it was before the push is there
+      # to compare with however many commits the push brought.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.MERGE_SHA }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Has the version changed?
         id: version
+        env:
+          BEFORE: ${{ github.event.before }}
         run: |
           tpversion() {
             git show "${1}:src/tpconst.pas" |
               sed -n "s/^ *TPVersion *= *'\([^']*\)'.*/\1/p"
           }
           new=$(tpversion HEAD)
-          old=$(tpversion HEAD^1)
-          echo "version before the merge: ${old:-(none)}, after: $new"
+          old=$(tpversion "$BEFORE")
+          echo "version before the push: ${old:-(none)}, after: $new"
           if [ -z "$new" ]; then
             echo "::error::could not read TPVersion from src/tpconst.pas"
             exit 1
@@ -74,8 +73,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.MERGE_SHA }}
 
       - name: Install Free Pascal
         run: |
@@ -131,6 +128,6 @@ jobs:
           ls -l packages
           gh release create "v$VERSION" packages/*.deb \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$MERGE_SHA" \
+            --target "$GITHUB_SHA" \
             --title "TurboPerl $VERSION" \
             --generate-notes
