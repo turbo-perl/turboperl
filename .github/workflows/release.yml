@@ -71,7 +71,7 @@ jobs:
         id: deb
         run: |
           make deb
-          echo "file=$(ls turboperl_*.deb)" >> "$GITHUB_OUTPUT"
+          echo "file=$(ls packages/turboperl_*.deb)" >> "$GITHUB_OUTPUT"
 
       # Install it for real, which proves the package is well formed and
       # its dependencies resolve, and check it is the version being tagged.

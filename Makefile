@@ -79,13 +79,15 @@ uninstall:
 # Ubuntu do not package, so it cannot be named as a dependency.
 VERSION   := $(shell sed -n "s/^ *TPVersion *= *'\([^']*\)'.*/\1/p" $(SRCDIR)/tpconst.pas)
 DEBARCH   := $(shell dpkg --print-architecture 2>/dev/null)
-DEBROOT   := debian-root
-DEB       := $(TARGET)_$(VERSION)_$(DEBARCH).deb
+PKGDIR    := packages
+DEBROOT   := $(PKGDIR)/root
+DEB       := $(PKGDIR)/$(TARGET)_$(VERSION)_$(DEBARCH).deb
 
 deb: $(DEB)
 
 $(DEB): $(TARGET) lib/TurboPerl/Unbuffer.pm lib/TurboPerl/Debug/Bridge.pm
 	rm -rf $(DEBROOT)
+	mkdir -p $(PKGDIR)
 	$(MAKE) install DESTDIR=$(CURDIR)/$(DEBROOT) PREFIX=/usr
 	install -d $(DEBROOT)/DEBIAN $(DEBROOT)/usr/share/doc/$(TARGET)
 	install -m 644 README.md $(DEBROOT)/usr/share/doc/$(TARGET)/README.md
@@ -109,5 +111,5 @@ $(DEB): $(TARGET) lib/TurboPerl/Unbuffer.pm lib/TurboPerl/Debug/Bridge.pm
 	rm -rf $(DEBROOT)
 
 clean:
-	rm -rf $(UNITDIR) $(TARGET) $(TESTS) $(DEBROOT) $(TARGET)_*.deb
+	rm -rf $(UNITDIR) $(TARGET) $(TESTS) $(PKGDIR)
 	rm -f $(SRCDIR)/*.o $(SRCDIR)/*.ppu $(TESTDIR)/*.o $(TESTDIR)/*.ppu
