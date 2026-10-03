@@ -142,8 +142,10 @@ sub test {
   print "final scanner state: $state\n";
 
   # run-tests.sh drives the interface through tmux; on Windows
-  # tests/run-tests.pl does the same through VisionDrive.
-  build() unless -f $target;
+  # tests/run-tests.pl does the same through VisionDrive.  Built every
+  # time, as make would when the sources change: FPC recompiles only what
+  # has, and an IDE left over from before is not the one to test.
+  build();
   print "\n";
   run($^X, File::Spec->catfile('tests', 'run-tests.pl'));
 }
@@ -153,7 +155,7 @@ sub test {
 #   <prefix>\lib\TurboPerl\...
 #   <prefix>\examples\...
 sub install {
-  build() unless -f $target;
+  build();
   stage($opt{prefix});
   print "installed under $opt{prefix}; add it to your PATH to run turboperl from anywhere\n";
 }
