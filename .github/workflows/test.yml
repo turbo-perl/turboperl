@@ -45,10 +45,8 @@ jobs:
       - name: Test
         run: make test
 
-  # Windows builds with build.pl rather than make, and has no tmux for the
-  # interface tests.  The port is still in progress, so this job is not yet
-  # one of those the "test" check below waits on: it shows where Windows
-  # stands without holding up merges.
+  # Windows builds with build.pl rather than make, and drives the interface
+  # tests through VisionDrive rather than tmux, so it is a job of its own.
   windows:
     runs-on: windows-2025
     defaults:
@@ -62,10 +60,9 @@ jobs:
       - name: Install Free Pascal
         uses: ./.github/actions/install-fpc-windows
 
-      # Whether Devel::ebug installs on Windows at all is one of the things
-      # to find out, so a failure here should not stop the build and tests.
+      # The integrated debugger drives Devel::ebug.  --notest, as on Linux:
+      # its own suite is not what is being tested here.
       - name: Install Devel::ebug
-        continue-on-error: true
         run: cpanm --notest --quiet Devel::ebug
 
       - name: Versions
@@ -97,17 +94,20 @@ jobs:
         run: perl build.pl test
 
   # Branch protection requires a check called "test".  The matrix jobs are
-  # named after their runners, so this one stands for all of them, and
-  # runners can come and go without the protection rule changing.  It must
-  # run even when a build fails: a skipped required check counts as passed.
+  # named after their runners, so this one stands for all of them, Windows
+  # included, and runners can come and go without the protection rule
+  # changing.  It must run even when a build fails: a skipped required
+  # check counts as passed.
   test:
-    needs: build
+    needs: [build, windows]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - name: Every build passed
         env:
-          RESULT: ${{ needs.build.result }}
+          LINUX: ${{ needs.build.result }}
+          WINDOWS: ${{ needs.windows.result }}
         run: |
-          echo "builds: $RESULT"
-          test "$RESULT" = success
+          echo "Linux builds: $LINUX, Windows: $WINDOWS"
+          test "$LINUX" = success
+          test "$WINDOWS" = success
