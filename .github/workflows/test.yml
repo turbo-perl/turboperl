@@ -95,6 +95,22 @@ jobs:
           perl -v | Select-Object -Skip 1 -First 1
           perl -e 'print eval { require Devel::ebug; qq{Devel::ebug $Devel::ebug::VERSION\n} } || qq{Devel::ebug not installed\n}'
 
+      # The interface tests drive the IDE through VisionDrive, as the Linux
+      # ones do through tmux.
+      - name: Check out VisionDrive
+        uses: actions/checkout@v4
+        with:
+          repository: turbo-perl/VisionDrive
+          path: VisionDrive
+
+      - name: Build VisionDrive
+        run: |
+          New-Item -ItemType Directory -Force VisionDrive\units | Out-Null
+          C:\FPC\3.2.2\bin\i386-win32\fpc.exe -Px86_64 -FUVisionDrive\units `
+            -FEVisionDrive VisionDrive\visiondrive.pas
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "VISIONDRIVE=$env:GITHUB_WORKSPACE\VisionDrive\visiondrive.exe" >> $env:GITHUB_ENV
+
       - name: Build
         run: perl build.pl
 
