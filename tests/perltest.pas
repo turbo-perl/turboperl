@@ -41,12 +41,15 @@ begin
   Write('output: ', R.Output);
 
   { Windows passes a command line, not a list, so quotes, backslashes and
-    empty arguments all have to survive being joined up and split again. }
+    empty arguments all have to survive being joined up and split again.
+    On Unix an empty argument sends the command through the shell, so the
+    quote in it's has to survive that. }
   R := RunCaptured(Perl, ['-e', 'print join(q{|}, map { "[$_]" } @ARGV)',
-                          'has space', 'say "hi"', '', 'back\slash\', 'a\"b', 'last'],
+                          'has space', 'say "hi"', '', 'back\slash\', 'a\"b',
+                          'it''s', 'last'],
                    '', '', 5000);
   WriteLn('arguments: ', R.Output);
-  if R.Output <> '[has space]|[say "hi"]|[]|[back\slash\]|[a\"b]|[last]' then
+  if R.Output <> '[has space]|[say "hi"]|[]|[back\slash\]|[a\"b]|[it''s]|[last]' then
   begin
     WriteLn('FAIL arguments did not arrive as given');
     Halt(1);

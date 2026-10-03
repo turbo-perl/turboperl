@@ -75,9 +75,10 @@ function RunOnConsole(const Exe: AnsiString; const Args: array of AnsiString;
 { Locate a program on PATH.  Returns '' when it is not there. }
 function FindOnPath(const Name: AnsiString): AnsiString;
 
-{ Add one argument to P's command line so that the program sees exactly it.
-  Every TProcess here takes its arguments through this. }
-procedure AddArg(P: TProcess; const Arg: AnsiString);
+{ Set the program P runs and its arguments, so that the program sees
+  exactly those arguments.  Every TProcess here is set up through this. }
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
 
 { Pull the "at FILE line N" locations out of a block of perl output. }
 function ParseDiagnostics(const Output: AnsiString): TPerlMsgList;
@@ -180,33 +181,74 @@ end;
   instead, by the rules the C runtime splits with: backslashes are literal
   except before a ", where each is doubled, and the " is escaped.
   TProcess leaves an argument that already holds a " alone, so this reaches
-  the program as written. }
-procedure AddArg(P: TProcess; const Arg: AnsiString);
+  the program as written.
+
+  Unix has argv, but TProcess builds it with StrNew, which gives nil for an
+  empty string, and that nil ends the list: perl a '' b sees only a.  When
+  there is an empty argument the command goes through the shell instead,
+  quoted for it, and exec hands the process straight to the program, so the
+  pipes, the exit code and the pid are all still the program's own. }
 {$ifdef MSWINDOWS}
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
 var
   Q: AnsiString;
-  i, Slashes: Integer;
+  i, j, Slashes: Integer;
 begin
-  Q := '"';
-  Slashes := 0;
-  for i := 1 to Length(Arg) do
-    case Arg[i] of
-      '\': Inc(Slashes);
-      '"':
-        begin
-          Q := Q + StringOfChar('\', Slashes * 2 + 1) + '"';
-          Slashes := 0;
-        end;
-    else
-      Q := Q + StringOfChar('\', Slashes) + Arg[i];
-      Slashes := 0;
-    end;
-  Q := Q + StringOfChar('\', Slashes * 2) + '"';
-  P.Parameters.Add(Q);
+  P.Executable := Exe;
+  for j := Low(Args) to High(Args) do
+  begin
+    Q := '"';
+    Slashes := 0;
+    for i := 1 to Length(Args[j]) do
+      case Args[j][i] of
+        '\': Inc(Slashes);
+        '"':
+          begin
+            Q := Q + StringOfChar('\', Slashes * 2 + 1) + '"';
+            Slashes := 0;
+          end;
+      else
+        Q := Q + StringOfChar('\', Slashes) + Args[j][i];
+        Slashes := 0;
+      end;
+    Q := Q + StringOfChar('\', Slashes * 2) + '"';
+    P.Parameters.Add(Q);
+  end;
 end;
 {$else}
+procedure SetCommand(P: TProcess; const Exe: AnsiString;
+                     const Args: array of AnsiString);
+
+  function ShQuote(const S: AnsiString): AnsiString;
+  begin
+    Result := '''' + StringReplace(S, '''', '''\''''', [rfReplaceAll]) + '''';
+  end;
+
+var
+  i: Integer;
+  HasEmpty: Boolean;
+  Line: AnsiString;
 begin
-  P.Parameters.Add(Arg);
+  HasEmpty := False;
+  for i := Low(Args) to High(Args) do
+    if Args[i] = '' then HasEmpty := True;
+  { A program that cannot be found is left for TProcess to fail on, which
+    it reports better than the shell would. }
+  if HasEmpty and (FindOnPath(Exe) <> '') then
+  begin
+    Line := 'exec ' + ShQuote(Exe);
+    for i := Low(Args) to High(Args) do
+      Line := Line + ' ' + ShQuote(Args[i]);
+    P.Executable := '/bin/sh';
+    P.Parameters.Add('-c');
+    P.Parameters.Add(Line);
+  end
+  else
+  begin
+    P.Executable := Exe;
+    for i := Low(Args) to High(Args) do P.Parameters.Add(Args[i]);
+  end;
 end;
 {$endif}
 
@@ -265,8 +307,7 @@ begin
   P := TProcess.Create(nil);
   try
     try
-      P.Executable := Exe;
-      for i := Low(Args) to High(Args) do AddArg(P, Args[i]);
+      SetCommand(P, Exe, Args);
       if WorkDir <> '' then P.CurrentDirectory := WorkDir;
       ApplyEnv(P, ExtraEnv);
       { No poUsePipes: the child gets the terminal the IDE just gave back. }
@@ -327,9 +368,7 @@ begin
   P := TProcess.Create(nil);
   try
     try
-      P.Executable := Exe;
-      for i := Low(Args) to High(Args) do
-        AddArg(P, Args[i]);
+      SetCommand(P, Exe, Args);
       if WorkDir <> '' then P.CurrentDirectory := WorkDir;
       ApplyEnv(P, ExtraEnv);
       { Merging stderr into stdout keeps warnings and output in the order

@@ -344,11 +344,8 @@ begin
   end;
 
   FProc := TProcess.Create(nil);
-  FProc.Executable := Cfg.PerlExe;
-  AddArg(FProc, '-I' + LibDir);
-  AddArg(FProc, '-MTurboPerl::Debug::Bridge');
-  AddArg(FProc, '-e');
-  AddArg(FProc, 'TurboPerl::Debug::Bridge::run()');
+  SetCommand(FProc, Cfg.PerlExe, ['-I' + LibDir, '-MTurboPerl::Debug::Bridge',
+                                  '-e', 'TurboPerl::Debug::Bridge::run()']);
   FProc.CurrentDirectory := ExtractFilePath(ExpandFileName(Script));
   FProc.Options := [poUsePipes];
   try
