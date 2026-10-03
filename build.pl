@@ -137,8 +137,11 @@ sub test {
   $state =~ s/\s+//g;
   print "final scanner state: $state\n";
 
-  # run-tests.sh drives the interface through tmux, which Windows lacks.
-  print "\n(skipping the scripted interface tests: they need tmux)\n";
+  # run-tests.sh drives the interface through tmux; on Windows
+  # tests/run-tests.pl does the same through VisionDrive.
+  build() unless -f $target;
+  print "\n";
+  run($^X, File::Spec->catfile('tests', 'run-tests.pl'));
 }
 
 # The layout DetectLibDir looks for beside the binary:

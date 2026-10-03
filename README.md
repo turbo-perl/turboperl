@@ -114,8 +114,12 @@ Add that directory to your `PATH` to run `turboperl` from anywhere.
 Settings are kept in `.turboperlrc` in your home directory: `%HOME%` if it is
 set, as it is under Git Bash, and otherwise `%USERPROFILE%`.
 
-`test` runs the unit tests, but not the scripted interface tests: those
-drive the IDE through tmux, which Windows doesn't have.
+`test` runs the unit tests, then the interface tests in
+`testsun-tests.pl`, which drive the IDE the way `run-tests.sh` does with
+tmux, through [VisionDrive](https://github.com/turbo-perl/VisionDrive).  It
+looks for `visiondrive.exe` in `%VISIONDRIVE%`, on the `PATH`, then in a
+VisionDrive checkout beside this one, and skips the interface tests if it
+can't find one.
 
 ## Running
 
