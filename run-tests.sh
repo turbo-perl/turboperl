@@ -147,6 +147,27 @@ perl -e 'print "my \$r = \"";
 
 echo "== TurboPerl interface tests =="
 
+# ------------------------------------------------- 0. versions agree
+# The perl modules ship with the IDE, so any that declare a $VERSION must
+# carry the same one as the IDE itself.  Versions are x.yy: a whole number,
+# a point, then exactly two digits.
+TPV=$(sed -n "s/^ *TPVersion *= *'\([^']*\)'.*/\1/p" src/tpconst.pas)
+if printf '%s' "$TPV" | grep -qE '^[0-9]+\.[0-9]{2}$'; then
+    PASS=$((PASS + 1)); echo "ok   the IDE version is x.yy ($TPV)"
+else
+    FAIL=$((FAIL + 1)); echo "FAIL the IDE version is x.yy (${TPV:-not found})"
+fi
+for PM in $(find lib -name '*.pm' | sort); do
+    PMV=$(sed -n "s/^our \$VERSION *= *'\([^']*\)'.*/\1/p" "$PM")
+    [ -n "$PMV" ] || continue
+    if [ -n "$TPV" ] && [ "$PMV" = "$TPV" ]; then
+        PASS=$((PASS + 1)); echo "ok   $PM version matches the IDE ($TPV)"
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL $PM version matches the IDE ($PMV, IDE is ${TPV:-not found})"
+    fi
+done
+
 # ------------------------------------------------------- 1. it comes up
 start "$TMPDIR_T/good.pl"
 S=$(screen)

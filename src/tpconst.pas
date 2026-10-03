@@ -11,7 +11,7 @@ unit TPConst;
 interface
 
 const
-  TPVersion   = '1.0';
+  TPVersion   = '0.01';
   TPTitle     = 'TurboPerl';
   TPCopyright = 'A Turbo Pascal style IDE for Perl';
 
