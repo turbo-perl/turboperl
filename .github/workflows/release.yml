@@ -2,8 +2,8 @@ name: release
 
 # A push to main that changes TPVersion is a release: the commit pushed,
 # normally the merge commit of a pull request, is tagged v<version>, and .deb
-# packages built from it for amd64 and arm64, and a zip for 64-bit Windows,
-# are attached to the GitHub release of that tag.  Pushes that leave the version alone do nothing.
+# packages built from it for amd64 and arm64, and a zip and an installer for
+# 64-bit Windows, are attached to the GitHub release of that tag.  Pushes that leave the version alone do nothing.
 #
 # It runs on the push rather than on the pull request closing so that the
 # run belongs to the commit that gets tagged, and shows up beside its tests.
@@ -143,6 +143,24 @@ jobs:
           path: packages/*.zip
           if-no-files-found: error
 
+      - name: Install Inno Setup
+        uses: ./.github/actions/install-inno-setup
+
+      - name: Build the installer
+        run: perl build.pl installer
+
+      # Install it, PATH and all, run what it installed, and uninstall it.
+      - name: Check the installer
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./tests/check-installer.ps1 "packages\turboperl-$env:VERSION-setup.exe" $env:VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-win64
+          path: packages/*-setup.exe
+          if-no-files-found: error
+
   # Only once every package has built, so a failure on one architecture
   # never leaves a tag or a release with half its packages.
   release:
@@ -163,13 +181,19 @@ jobs:
           path: packages
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: setup-*
+          path: packages
+          merge-multiple: true
+
       - name: Tag and release
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l packages
-          gh release create "v$VERSION" packages/*.deb packages/*.zip \
+          gh release create "v$VERSION" packages/*.deb packages/*.zip packages/*-setup.exe \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "TurboPerl $VERSION" \
