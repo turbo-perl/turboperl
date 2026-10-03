@@ -428,7 +428,9 @@ press('Right', 'Right');
 waitfor('    [0] = 1', 3000);
 check('an element opens in turn', screen(), '    [0] = 1');
 press('Left', 'Left', 'Left');
-gone('{name}', 3000);
+# Not for {name} to go: the pane is three rows, and it has already
+# scrolled out of sight with {list} open.  For the closed line.
+waitfor('+ $deep = {list', 3000);
 $s = screen();
 check('Left goes back up and closes',    $s, '+ $deep = {list');
 check_not('leaving the elements hidden', $s, '{name}');
