@@ -92,6 +92,9 @@ type
     procedure SuspendScreen;
     procedure ResumeScreen;
     procedure ShowUserScreen;
+    {$IFDEF MSWINDOWS}
+    procedure ShellOnConsole;
+    {$ENDIF}
 
     procedure Complain(const S: AnsiString);
     procedure Caution(const S: AnsiString);
@@ -1071,6 +1074,27 @@ begin
     Drivers.DoneVideo;
 end;
 
+{$IFDEF MSWINDOWS}
+{ Free Vision's own Shell to OS tears the video unit down and runs
+  %COMSPEC% wherever it was drawing, which on Windows is the IDE's screen
+  buffer.  The shell belongs on the console, like a console run, so that
+  what is done there is still on the user screen afterwards.  Its DosShell
+  is not virtual, so HandleEvent takes the command before it can. }
+procedure TTurboPerl.ShellOnConsole;
+var
+  Shell: AnsiString;
+begin
+  Shell := GetEnvironmentVariable('COMSPEC');
+  if Shell = '' then Shell := 'cmd.exe';
+  SuspendScreen;
+  WriteLn;
+  WriteLn('--- ', TPTitle, ': type EXIT to return ---');
+  Flush(Output);
+  RunOnConsole(Shell, [], '', []);
+  ResumeScreen;
+end;
+{$ENDIF}
+
 { Turbo Pascal's user screen: step off the IDE's display and back onto the
   terminal underneath, which is where a console run left its output. }
 procedure TTurboPerl.ShowUserScreen;
@@ -1794,6 +1818,14 @@ procedure TTurboPerl.HandleEvent(var Event: TEvent);
 var
   Ed: PPerlEditor;
 begin
+  {$IFDEF MSWINDOWS}
+  if (Event.What = evCommand) and (Event.Command = cmDosShell) then
+  begin
+    ShellOnConsole;
+    ClearEvent(Event);
+    Exit;
+  end;
+  {$ENDIF}
   inherited HandleEvent(Event);
 
   if Event.What <> evCommand then Exit;
