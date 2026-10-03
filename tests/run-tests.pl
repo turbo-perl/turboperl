@@ -4,8 +4,7 @@
 # The Windows counterpart of run-tests.sh: the IDE is driven through
 # VisionDrive (https://github.com/turbo-perl/VisionDrive), which runs it in
 # a console of its own and types into it, the way run-tests.sh uses tmux.
-# The cases are run-tests.sh's, less the colour checks, which VisionDrive
-# cannot see yet, and the ones about Unix terminals.
+# The cases are run-tests.sh's, less the ones about Unix terminals.
 #
 #   perl tests/run-tests.pl          run them all
 #   perl tests/run-tests.pl -v       also print each captured screen
@@ -87,6 +86,9 @@ sub screen {
   print map { "     > $_\n" } split /\n/, $s if $verbose;
   $s;
 }
+
+# the screen with its colours as ANSI escapes, as tmux capture-pane -e has it
+sub screen_colour { scalar `"$vd" screen $session -e` }
 
 sub alive { system($vd, 'alive', $session) == 0 }
 
@@ -225,6 +227,13 @@ check('the title shows the file', $s, 'good.pl');
 # The console shows an ESC it does not obey as an arrow, U+2190, which the
 # screen arrives in as UTF-8.
 check_not('no escape sequence is printed', $s, "\xe2\x86\x90]");
+
+# ------------------------------------------------- syntax highlighting
+my $c = screen_colour();
+check('keywords are coloured',  $c, "\e[97m");
+check('comments are coloured',  $c, "\e[36m");
+check('strings are coloured',   $c, "\e[92m");
+check('variables are coloured', $c, "\e[96m");
 stop();
 
 # --------------------------------------------------- 2. syntax check, clean
@@ -347,10 +356,13 @@ start(100, 30, $dbg);
 press('F7');
 waitfor('3:1');
 check('the debugger starts and stops before the first statement', screen(), '3:1');
+# black on cyan is the current statement marker
+check('the current statement is marked', screen_colour(), "\e[30m\e[46m");
 
 # down to the '$total += $n' line, set a break point there, and go to it
 press('Down', 'Down', 'Down', 'C-F8');
 sleep 1;
+check('a break point line turns red', screen_colour(), "\e[41m");
 press('C-F9');
 waitfor('6:1');
 check('continue stops at the break point', screen(), '6:1');
