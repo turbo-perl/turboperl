@@ -1,0 +1,136 @@
+name: release
+
+# A merged pull request that changes TPVersion is a release: the merge
+# commit is tagged v<version>, and .deb packages built from it for amd64 and
+# arm64 are attached to the GitHub release of that tag.  Merges that leave
+# the version alone do nothing.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Two merges in quick succession must not race each other to the tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+
+jobs:
+  version:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Depth 2 brings in the merge commit's parents, the first of which is
+      # main as it was before the merge.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MERGE_SHA }}
+          fetch-depth: 2
+
+      - name: Has the version changed?
+        id: version
+        run: |
+          tpversion() {
+            git show "${1}:src/tpconst.pas" |
+              sed -n "s/^ *TPVersion *= *'\([^']*\)'.*/\1/p"
+          }
+          new=$(tpversion HEAD)
+          old=$(tpversion HEAD^1)
+          echo "version before the merge: ${old:-(none)}, after: $new"
+          if [ -z "$new" ]; then
+            echo "::error::could not read TPVersion from src/tpconst.pas"
+            exit 1
+          fi
+          if [ "$new" = "$old" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A version that has already been released has been reused by
+          # mistake; say so rather than quietly doing nothing.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null; then
+            echo "::error::v$new is already tagged; bump the version again"
+            exit 1
+          fi
+          echo "changed=true"    >> "$GITHUB_OUTPUT"
+          echo "version=$new"    >> "$GITHUB_OUTPUT"
+
+  # Each architecture is built natively on a runner of its own kind; make
+  # deb takes the architecture from dpkg, so nothing here names it.
+  package:
+    needs: version
+    if: needs.version.outputs.changed == 'true'
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MERGE_SHA }}
+
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fpc fp-units-fv
+
+      - name: Build the package
+        id: deb
+        run: |
+          make deb
+          echo "file=$(ls packages/turboperl_*.deb)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(dpkg --print-architecture)"   >> "$GITHUB_OUTPUT"
+
+      # Install it for real, which proves the package is well formed and
+      # its dependencies resolve, and check it is the version being tagged.
+      - name: Check the package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DEB: ${{ steps.deb.outputs.file }}
+        run: |
+          dpkg-deb --info "$DEB"
+          sudo apt-get install -y "./$DEB"
+          got=$(/usr/bin/turboperl --version)
+          echo "$got"
+          test "$got" = "TurboPerl $VERSION"
+          test -f /usr/share/turboperl/lib/TurboPerl/Debug/Bridge.pm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ steps.deb.outputs.arch }}
+          path: ${{ steps.deb.outputs.file }}
+          if-no-files-found: error
+
+  # Only once every package has built, so a failure on one architecture
+  # never leaves a tag or a release with half its packages.
+  release:
+    needs: [version, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: packages
+          merge-multiple: true
+
+      - name: Tag and release
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l packages
+          gh release create "v$VERSION" packages/*.deb \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$MERGE_SHA" \
+            --title "TurboPerl $VERSION" \
+            --generate-notes

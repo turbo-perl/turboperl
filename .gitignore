@@ -1,6 +1,7 @@
 # Build output
 /units/
 /turboperl
+/packages/
 
 # Compiled test programs; their sources are tracked
 /tests/cfgtest

@@ -63,6 +63,8 @@ type
     FSeq      : Integer;
     FPending  : TFPList;         { parsed messages not yet consumed    }
     FError    : AnsiString;
+    FWarning  : AnsiString;      { not fatal, drained by TakeWarning    }
+    FLibDir   : AnsiString;      { where the bridge was loaded from    }
 
     FFile     : AnsiString;
     FLine     : Integer;
@@ -116,6 +118,7 @@ type
     function  Poll: Boolean;
 
     function  TakeOutput: AnsiString;
+    function  TakeWarning: AnsiString;
     function  StackCount: Integer;
     function  StackFrame(i: Integer): TStackFrame;
 
@@ -326,9 +329,11 @@ var
   LibDir: AnsiString;
 begin
   Stop;
-  FError := '';
+  FError   := '';
+  FWarning := '';
 
-  LibDir := Cfg.LibDir;
+  LibDir  := Cfg.LibDir;
+  FLibDir := LibDir;
   if (LibDir = '') or
      (not FileExists(IncludeTrailingPathDelimiter(LibDir) + 'TurboPerl' +
                      PathDelim + 'Debug' + PathDelim + 'Bridge.pm')) then
@@ -633,10 +638,27 @@ var
   Actual : Integer;
   Line   : Integer;
   AFile  : AnsiString;
+  Data   : TJSONData;
+  Version: AnsiString;
 begin
   Ev := Msg.Get('ev', '');
 
-  if Ev = 'stopped' then
+  if Ev = 'hello' then
+  begin
+    { The bridge ships with the IDE; one from another release may not speak
+      the same protocol, which shows up later as stranger failures. }
+    Data := Msg.Find('version');
+    if (Data <> nil) and (Data.JSONType = jtString) then
+      Version := Data.AsString
+    else
+      Version := '(none)';
+    if Version <> TPVersion then
+      FWarning := 'the debugger bridge is version ' +
+                  Version + ' but the IDE is ' +
+                  TPVersion + '; expected a matching TurboPerl/Debug/' +
+                  'Bridge.pm under ' + FLibDir;
+  end
+  else if Ev = 'stopped' then
   begin
     SetStoppedFrom(Msg);
     FOutput  := FOutput + Msg.Get('output', '');
@@ -740,6 +762,12 @@ function TDebugSession.TakeOutput: AnsiString;
 begin
   Result  := FOutput;
   FOutput := '';
+end;
+
+function TDebugSession.TakeWarning: AnsiString;
+begin
+  Result   := FWarning;
+  FWarning := '';
 end;
 
 function TDebugSession.StackCount: Integer;

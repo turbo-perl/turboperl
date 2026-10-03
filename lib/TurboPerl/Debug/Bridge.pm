@@ -26,7 +26,7 @@ use warnings;
 use Devel::ebug;
 use Scalar::Util qw( blessed reftype refaddr looks_like_number );
 
-our $VERSION = '1.0';
+our $VERSION = '0.01';
 
 my $JSON;
 
