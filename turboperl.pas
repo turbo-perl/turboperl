@@ -11,6 +11,9 @@ program TurboPerl;
 {$mode objfpc}{$H-}
 
 uses
+  { First, so that on Windows its initialisation runs before the video
+    unit's: see TPWinCon. }
+  {$IFDEF MSWINDOWS} TPWinCon, {$ENDIF}
   SysUtils,
   TPConst, TPConfig, TPApp;
 

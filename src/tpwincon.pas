@@ -22,6 +22,24 @@ function SetConsolePalette(const RGB: array of LongWord): Boolean;
 { Put back the colours SetConsolePalette replaced. }
 procedure RestoreConsolePalette;
 
+{ The console's answer to a terminal's alternate screen: a screen buffer of
+  the IDE's own, so that the console's - the shell's history, and the
+  output of console runs - is left as it was underneath.
+
+  Free Pascal's video unit draws on whatever the standard output was when
+  it was initialised, and keeps that to itself, so the buffer is made, and
+  made the standard output, in this unit's initialisation - which is why
+  this has to be the first unit the program uses.  It is not shown until
+  UseOwnScreen, so anything printed before the IDE starts, such as --help,
+  still reaches the console.  ShowConsole and ShowOwnScreen switch between the two,
+  for console runs and the user screen; while the console is showing it
+  takes escape sequences, as a terminal would.  However the IDE ends, the
+  console is shown again.  False from UseOwnScreen leaves everything on the
+  one buffer, as it was. }
+function UseOwnScreen: Boolean;
+procedure ShowConsole;
+procedure ShowOwnScreen;
+
 implementation
 
 uses
@@ -50,6 +68,12 @@ function SetConsoleScreenBufferInfoEx(hConsoleOutput: THandle;
   var Info: TConsoleScreenBufferInfoEx): BOOL; stdcall;
   external 'kernel32.dll' name 'SetConsoleScreenBufferInfoEx';
 
+{ In it, but with the security attributes a var, where nil is wanted. }
+function CreateConsoleScreenBuffer(dwDesiredAccess, dwShareMode: DWORD;
+  lpSecurityAttributes: Pointer; dwFlags: DWORD;
+  lpScreenBufferData: Pointer): THandle; stdcall;
+  external 'kernel32.dll' name 'CreateConsoleScreenBuffer';
+
 var
   Saved     : array[0..15] of COLORREF;
   HaveSaved : Boolean = False;
@@ -67,7 +91,8 @@ var
   i: Integer;
 begin
   Result := False;
-  Con := GetStdHandle(STD_OUTPUT_HANDLE);
+  { The buffer being drawn on, which may be the IDE's own. }
+  Con := TextRec(Output).Handle;
   FillChar(Info, SizeOf(Info), 0);
   Info.cbSize := SizeOf(Info);
   if not GetConsoleScreenBufferInfoEx(Con, Info) then Exit;
@@ -105,4 +130,85 @@ begin
   if HaveSaved then Apply(Saved);
 end;
 
+{ -------------------------------------------------------------------------- }
+
+const
+  ENABLE_VIRTUAL_TERMINAL_PROCESSING = $0004;
+
+var
+  ConsoleBuf : THandle = 0;    { the shell's, as we found it }
+  OwnBuf     : THandle = 0;    { the IDE's }
+  ConsoleMode: DWORD = 0;
+  HaveMode   : Boolean = False;
+
+{ Show Buf, and write on it.  Output is where WriteLn goes. }
+procedure Point(Buf: THandle);
+begin
+  TextRec(Output).Handle := Buf;
+  SetConsoleActiveScreenBuffer(Buf);
+end;
+
+{ Made at initialisation, before the video unit takes the standard output
+  for its own.  Only for a console: with output to a pipe or a file there
+  is no screen to keep. }
+procedure MakeOwnBuffer;
+var
+  Info: TConsoleScreenBufferInfo;
+  Size: TCoord;
+begin
+  ConsoleBuf := GetStdHandle(STD_OUTPUT_HANDLE);
+  if not GetConsoleScreenBufferInfo(ConsoleBuf, Info) then Exit;
+  OwnBuf := CreateConsoleScreenBuffer(GENERIC_READ or GENERIC_WRITE,
+                                      FILE_SHARE_READ or FILE_SHARE_WRITE,
+                                      nil, CONSOLE_TEXTMODE_BUFFER, nil);
+  if OwnBuf = INVALID_HANDLE_VALUE then
+  begin
+    OwnBuf := 0;
+    Exit;
+  end;
+  { Exactly the console\x27s window, so the IDE has no scroll bars to show. }
+  Size.X := Info.srWindow.Right - Info.srWindow.Left + 1;
+  Size.Y := Info.srWindow.Bottom - Info.srWindow.Top + 1;
+  SetConsoleScreenBufferSize(OwnBuf, Size);
+  SetStdHandle(STD_OUTPUT_HANDLE, OwnBuf);
+end;
+
+function UseOwnScreen: Boolean;
+begin
+  Result := OwnBuf <> 0;
+  if Result then Point(OwnBuf);
+end;
+
+{ Programs run on the console inherit the standard output, so while the
+  console is showing that is the console\x27s again. }
+procedure ShowConsole;
+begin
+  if OwnBuf = 0 then Exit;
+  SetStdHandle(STD_OUTPUT_HANDLE, ConsoleBuf);
+  Point(ConsoleBuf);
+  HaveMode := GetConsoleMode(ConsoleBuf, ConsoleMode);
+  if HaveMode then
+    SetConsoleMode(ConsoleBuf, ConsoleMode or ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+end;
+
+procedure ShowOwnScreen;
+begin
+  if OwnBuf = 0 then Exit;
+  if HaveMode then SetConsoleMode(ConsoleBuf, ConsoleMode);
+  HaveMode := False;
+  SetStdHandle(STD_OUTPUT_HANDLE, OwnBuf);
+  Point(OwnBuf);
+end;
+
+initialization
+  MakeOwnBuffer;
+
+finalization
+  if OwnBuf <> 0 then
+  begin
+    if HaveMode then SetConsoleMode(ConsoleBuf, ConsoleMode);
+    SetStdHandle(STD_OUTPUT_HANDLE, ConsoleBuf);
+    Point(ConsoleBuf);
+    CloseHandle(OwnBuf);
+  end;
 end.

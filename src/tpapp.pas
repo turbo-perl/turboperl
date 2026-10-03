@@ -145,6 +145,10 @@ var
     means we never managed to find out. }
   ConsoleRow : Integer = 0;
   ConsoleCol : Integer = 0;
+  {$IFDEF MSWINDOWS}
+  { Whether the IDE has a console screen buffer of its own; see TPWinCon. }
+  OwnScreen : Boolean = False;
+  {$ENDIF}
   {$IFDEF UNIX}
   { The terminal settings as the shell had them, so a console run gets the
     console back exactly as it was. }
@@ -395,6 +399,10 @@ begin
     Flush(Output);
   end;
   DebugScreenSwitch;
+  {$IFDEF MSWINDOWS}
+  { Before the video unit starts, which draws wherever Output points. }
+  OwnScreen := UseOwnScreen;
+  {$ENDIF}
 
   {$IFDEF UNIX} HideTmux; {$ENDIF}
   inherited Init;
@@ -1055,6 +1063,11 @@ begin
     Flush(Output);
   end
   else
+  {$IFDEF MSWINDOWS}
+  if OwnScreen then
+    ShowConsole
+  else
+  {$ENDIF}
     Drivers.DoneVideo;
 end;
 
@@ -1083,6 +1096,17 @@ begin
     InitSysError;
   end
   else
+  {$IFDEF MSWINDOWS}
+  if OwnScreen then
+  begin
+    { The IDE's buffer is just as it was left. }
+    ShowOwnScreen;
+    Drivers.InitKeyboard;
+    InitEvents;
+    InitSysError;
+  end
+  else
+  {$ENDIF}
   begin
     Drivers.InitKeyboard;
     Drivers.InitVideo;
