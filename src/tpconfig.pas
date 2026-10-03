@@ -53,6 +53,10 @@ type
 var
   Cfg: TConfig;
 
+{ The user's home directory: $HOME, or on Windows, where that is seldom set,
+  %USERPROFILE%.  '' when there is neither. }
+function  HomeDir: AnsiString;
+
 procedure DefaultConfig;
 function  ConfigFileName: AnsiString;
 function  LoadConfig: Boolean;
@@ -65,7 +69,7 @@ function TokColour(T: TPerlTok): Byte;
 function DetectLibDir: AnsiString;
 
 { A path for showing, with the home directory written as ~.  The second
-  form takes the home directory rather than asking $HOME, for testing. }
+  form takes the home directory rather than asking HomeDir, for testing. }
 function TildePath(const Path: AnsiString): AnsiString;
 function TildePath(const Path, Home: AnsiString): AnsiString;
 
@@ -149,18 +153,26 @@ end;
 
 { -------------------------------------------------------------------------- }
 
+function HomeDir: AnsiString;
+begin
+  Result := GetEnvironmentVariable('HOME');
+  {$ifdef MSWINDOWS}
+  if Result = '' then Result := GetEnvironmentVariable('USERPROFILE');
+  {$endif}
+end;
+
 function ConfigFileName: AnsiString;
 var
   Home: AnsiString;
 begin
-  Home := GetEnvironmentVariable('HOME');
+  Home := HomeDir;
   if Home = '' then Home := GetCurrentDir;
   Result := IncludeTrailingPathDelimiter(Home) + '.turboperlrc';
 end;
 
 function TildePath(const Path: AnsiString): AnsiString;
 begin
-  Result := TildePath(Path, GetEnvironmentVariable('HOME'));
+  Result := TildePath(Path, HomeDir);
 end;
 
 function TildePath(const Path, Home: AnsiString): AnsiString;

@@ -111,6 +111,9 @@ examples\
 
 Add that directory to your `PATH` to run `turboperl` from anywhere.
 
+Settings are kept in `.turboperlrc` in your home directory: `%HOME%` if it is
+set, as it is under Git Bash, and otherwise `%USERPROFILE%`.
+
 `test` runs the unit tests, but not the scripted interface tests: those
 drive the IDE through tmux, which Windows doesn't have.
 
