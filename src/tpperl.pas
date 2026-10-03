@@ -189,19 +189,42 @@ end;
   quoted for it, and exec hands the process straight to the program, so the
   pipes, the exit code and the pid are all still the program's own. }
 {$ifdef MSWINDOWS}
+{ Whether Exe is a Perl program wrapped in a .bat by pl2bat, as perltidy,
+  perlcritic and perldoc are on Windows.  The .bat holds the whole script
+  and runs it with perl -x, which skips to the #! line; going through
+  cmd.exe to get there would have it read & and % in the arguments as its
+  own, so such a program is run with perl -x directly instead. }
+function IsPl2Bat(const Exe: AnsiString): Boolean;
+var
+  F: TextFile;
+  Line, Ext: AnsiString;
+begin
+  Result := False;
+  Ext := LowerCase(ExtractFileExt(Exe));
+  if (Ext <> '.bat') and (Ext <> '.cmd') then Exit;
+  AssignFile(F, Exe);
+  {$I-}
+  Reset(F);
+  if IOResult <> 0 then Exit;
+  ReadLn(F, Line);
+  CloseFile(F);
+  {$I+}
+  if IOResult <> 0 then Exit;
+  Result := Copy(Line, 1, 20) = '@rem = ''--*-Perl-*--';
+end;
+
 procedure SetCommand(P: TProcess; const Exe: AnsiString;
                      const Args: array of AnsiString);
-var
-  Q: AnsiString;
-  i, j, Slashes: Integer;
-begin
-  P.Executable := Exe;
-  for j := Low(Args) to High(Args) do
+
+  procedure AddQuoted(const Arg: AnsiString);
+  var
+    Q: AnsiString;
+    i, Slashes: Integer;
   begin
     Q := '"';
     Slashes := 0;
-    for i := 1 to Length(Args[j]) do
-      case Args[j][i] of
+    for i := 1 to Length(Arg) do
+      case Arg[i] of
         '\': Inc(Slashes);
         '"':
           begin
@@ -209,12 +232,29 @@ begin
             Slashes := 0;
           end;
       else
-        Q := Q + StringOfChar('\', Slashes) + Args[j][i];
+        Q := Q + StringOfChar('\', Slashes) + Arg[i];
         Slashes := 0;
       end;
     Q := Q + StringOfChar('\', Slashes * 2) + '"';
     P.Parameters.Add(Q);
   end;
+
+var
+  Perl: AnsiString;
+  j: Integer;
+begin
+  Perl := '';
+  { The perl the .bat itself would have found. }
+  if IsPl2Bat(Exe) then Perl := FindOnPath('perl');
+  if Perl <> '' then
+  begin
+    P.Executable := Perl;
+    AddQuoted('-x');
+    AddQuoted(Exe);
+  end
+  else
+    P.Executable := Exe;
+  for j := Low(Args) to High(Args) do AddQuoted(Args[j]);
 end;
 {$else}
 procedure SetCommand(P: TProcess; const Exe: AnsiString;

@@ -1,7 +1,7 @@
 { Headless exerciser for the TPPerl unit. }
 program PerlTest;
 {$mode objfpc}{$H+}
-uses SysUtils, TPPerl;
+uses SysUtils, Classes, TPPerl;
 
 procedure ShowDiag(const Title, Output: AnsiString);
 var
@@ -18,6 +18,10 @@ end;
 var
   R: TRunResult;
   Perl: AnsiString;
+{$ifdef MSWINDOWS}
+  Bat: AnsiString;
+  Lines: TStringList;
+{$endif}
 begin
   Perl := FindOnPath('perl');
   WriteLn('perl found at: ', Perl);
@@ -54,6 +58,32 @@ begin
     WriteLn('FAIL arguments did not arrive as given');
     Halt(1);
   end;
+
+{$ifdef MSWINDOWS}
+  { Perl programs installed on Windows - perltidy, perlcritic, perldoc -
+    are .bat files made by pl2bat, and cmd.exe would read & and % in their
+    arguments as its own. }
+  Bat := GetTempDir + 'perltest-args.bat';
+  Lines := TStringList.Create;
+  Lines.Add('@rem = ''--*-Perl-*--');
+  Lines.Add('@perl -x -S %0 %*');
+  Lines.Add('@goto endofperl');
+  Lines.Add('@rem '';');
+  Lines.Add('#!perl');
+  Lines.Add('print join(q{|}, map { "[$_]" } @ARGV);');
+  Lines.Add('__END__');
+  Lines.Add(':endofperl');
+  Lines.SaveToFile(Bat);
+  Lines.Free;
+  R := RunCaptured(Bat, ['R&D', '100%', '%PATH%', 'a "b" c', '^', ''], '', '', 5000);
+  DeleteFile(Bat);
+  WriteLn('pl2bat arguments: ', R.Output);
+  if R.Output <> '[R&D]|[100%]|[%PATH%]|[a "b" c]|[^]|[]' then
+  begin
+    WriteLn('FAIL arguments did not reach a pl2bat program as given');
+    Halt(1);
+  end;
+{$endif}
 
   R := RunCaptured(Perl, ['-e', 'print scalar <STDIN>'], '', 'fed via stdin'#10, 5000);
   WriteLn('stdin round trip: ', TrimRight(R.Output));
